@@ -9,21 +9,15 @@
 ╠══════════════════════════════════════════════════════════════════════╣
 ║  SETUP STEPS:                                                        ║
 ║  1. Create a Supabase project at supabase.com                        ║
-║  2. Run SUPABASE_SCHEMA.sql (updated v4) in Supabase SQL Editor      ║
+║  2. Run SUPABASE_SCHEMA_v4.sql in Supabase SQL Editor                ║
 ║  3. Replace SUPABASE_URL and SUPABASE_ANON with your credentials     ║
 ║  4. Push this file to GitHub → Settings → Pages → Deploy             ║
-║  5. Default Admin login: username=admin  password=admin123           ║
-║     ⚠ Change the admin password immediately after first login!       ║
+║  5. Default login: username=admin  password=admin123                 ║
+║     ⚠ Change password immediately after first login!                ║
 ╠══════════════════════════════════════════════════════════════════════╣
-║  AUTH SYSTEM:                                                        ║
-║  • Login: Username + Password (no email required)                    ║
-║  • ADMIN role: Full access + User Management                         ║
-║  • USER role: All modules, read + write. Cannot delete any data.     ║
-╠══════════════════════════════════════════════════════════════════════╣
-║  REQUIRED TABLES (create via updated SQL schema):                   ║
-║  user_master, party_master, place_master, broker_master,            ║
-║  card_master, so_master, trip_dispatch_master, mf_master,           ║
-║  unloading_master, profit_master, account_master                     ║
+║  AUTH: Username + Password (no email). Roles: ADMIN / USER          ║
+║  ADMIN: full access + User Management + delete users                ║
+║  USER:  all modules, read+write, cannot delete data                 ║
 ╚══════════════════════════════════════════════════════════════════════╝
 -->
 <meta charset="UTF-8">
@@ -529,38 +523,27 @@ tbody tr:hover td{background:var(--blue-lt)}
   border:1px solid var(--border);
   border-radius:6px;
   padding:36px 40px;
-  width:360px;
-  box-shadow:0 8px 32px rgba(0,0,0,.35);
+  width:380px;
+  box-shadow:0 8px 32px rgba(0,0,0,.40);
 }
-.login-logo{
-  display:flex;align-items:center;gap:12px;
-  margin-bottom:28px;
-}
+.login-logo{display:flex;align-items:center;gap:12px;margin-bottom:28px}
 .login-logo-badge{
-  width:40px;height:40px;
-  background:var(--sb-accent);
-  border-radius:5px;
+  width:40px;height:40px;background:var(--sb-accent);border-radius:5px;
   display:flex;align-items:center;justify-content:center;
-  font-weight:800;font-size:15px;color:#fff;
-  font-family:var(--mono);
+  font-weight:800;font-size:15px;color:#fff;font-family:var(--mono);
 }
 .login-logo-text{font-size:15px;font-weight:700;color:var(--ink);line-height:1.2}
 .login-logo-sub{font-size:10px;color:var(--ink4)}
 .login-title{font-size:13px;font-weight:700;color:var(--ink2);margin-bottom:18px}
 .login-field{margin-bottom:14px}
 .login-field label{display:block;font-size:10px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px}
-.login-field input{width:100%;border:1px solid var(--border);border-radius:3px;padding:8px 10px;font-size:13px;color:var(--ink);background:var(--surface);outline:none;font-family:var(--sans)}
+.login-field input{width:100%;border:1px solid var(--border);border-radius:3px;padding:9px 11px;font-size:13px;color:var(--ink);background:var(--surface);outline:none;font-family:var(--sans);box-sizing:border-box}
 .login-field input:focus{border-color:var(--blue);outline:2px solid #b6d4fb;outline-offset:0}
-.login-btn{width:100%;padding:9px;background:var(--sb-bg);color:#fff;border:none;border-radius:3px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans);margin-top:4px}
-.login-btn:hover{background:var(--sb-hover)}
-.login-btn:active{background:var(--sb-active)}
-.login-error{background:var(--red-lt);color:var(--red);border:1px solid #ffcecb;border-radius:3px;padding:7px 10px;font-size:11px;font-weight:600;margin-bottom:12px;display:none}
-
-/* ━━━━━━ USER MANAGEMENT (admin only tab) ━━━━━━ */
-.user-role-badge{
-  display:inline-block;padding:2px 8px;border-radius:3px;
-  font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;
-}
+.login-btn{width:100%;padding:10px;background:var(--sb-bg);color:#fff;border:none;border-radius:3px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans);margin-top:4px;letter-spacing:.02em}
+.login-btn:hover{background:#1c3151}
+.login-btn:active{background:#1f4068}
+.login-error{background:var(--red-lt);color:var(--red);border:1px solid #ffcecb;border-radius:3px;padding:8px 11px;font-size:12px;font-weight:600;margin-bottom:14px;display:none}
+.user-role-badge{display:inline-block;padding:2px 8px;border-radius:3px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
 .urb-admin{background:#fff3cd;color:#856404;border:1px solid #ffc107}
 .urb-user{background:var(--blue-lt);color:var(--blue-dk);border:1px solid #b6d4fb}
 
@@ -707,13 +690,15 @@ table tfoot td { padding: 7px 10px; color: #fff; font-size: 11px; font-weight: 7
     <div class="login-error" id="login-error"></div>
     <div class="login-field">
       <label>Username</label>
-      <input type="text" id="login-username" placeholder="Enter username" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('login-password').focus()">
+      <input type="text" id="login-username" placeholder="Enter username"
+             onkeydown="if(event.key==='Enter')document.getElementById('login-password').focus()">
     </div>
     <div class="login-field">
       <label>Password</label>
-      <input type="password" id="login-password" placeholder="Enter password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
+      <input type="password" id="login-password" placeholder="Enter password"
+             onkeydown="if(event.key==='Enter')doLogin()">
     </div>
-    <button class="login-btn" onclick="doLogin()">Sign In →</button>
+    <button class="login-btn" onclick="doLogin()">Sign In &rarr;</button>
   </div>
 </div>
 
@@ -773,7 +758,7 @@ table tfoot td { padding: 7px 10px; color: #fff; font-size: 11px; font-weight: 7
       <div class="nav-divider"></div>
       <div class="nav-group-label">Admin</div>
       <div class="nav-item" onclick="navigate('usermgmt')">
-        <span class="nav-icon">👤</span>User Management
+        <span class="nav-icon">&#128100;</span>User Management
       </div>
     </div>
   </nav>
@@ -793,7 +778,7 @@ table tfoot td { padding: 7px 10px; color: #fff; font-size: 11px; font-weight: 7
         <span class="user-name" id="topbar-username">Admin</span>
       </div>
       <button class="btn btn-outline btn-sm" onclick="initSystem()" style="font-size:11px">⚡ Init</button>
-      <button class="btn btn-outline btn-sm" onclick="doLogout()" style="font-size:11px;color:var(--red);border-color:#ffcecb">⎋ Logout</button>
+      <button class="btn btn-outline btn-sm" onclick="doLogout()" style="font-size:11px;color:var(--red);border-color:#ffcecb">&#x2318; Logout</button>
     </div>
   </div>
   <div id="content">
@@ -809,9 +794,9 @@ table tfoot td { padding: 7px 10px; color: #fff; font-size: 11px; font-weight: 7
 // AUTH STATE
 // =============================================
 const auth = {
-  user: null,   // { id, username, role, display_name }
-  isAdmin: () => auth.user && auth.user.role === 'ADMIN',
-  isLoggedIn: () => !!auth.user
+  user: null,
+  isAdmin: function() { return auth.user && auth.user.role === 'ADMIN'; },
+  isLoggedIn: function() { return !!auth.user; }
 };
 
 // =============================================
@@ -933,8 +918,8 @@ function fmtNum(n) { return Number(n||0).toLocaleString('en-IN'); }
 // SUPABASE CONFIG — Replace with your project credentials
 // Get these from: supabase.com → Project → Settings → API
 // ═══════════════════════════════════════════════════════════
-const SUPABASE_URL  = 'https://qmgvkkoeutuminunddxr.supabase.co';
-const SUPABASE_ANON = 'sb_publishable_gn_7Kuzjn4OD_dufcEuHEA_V_lZRO-H';
+const SUPABASE_URL  = 'https://lxwtqqqrccniypdyevzz.supabase.co';
+const SUPABASE_ANON = 'sb_publishable_TCmTgpNCJs0k5gZvkWidRA_4UensBwU';
 
 // ── Low-level Supabase REST helper ──────────────────────────
 async function sb(table, method, body, query) {
@@ -963,27 +948,26 @@ const SB = {
 
   // ── USER MASTER ──
   async getUserByUsername(username) {
-    const data = await sb('user_master', 'GET', null, `?username=eq.${encodeURIComponent(username)}&limit=1`);
+    const data = await sb('user_master','GET',null,'?username=eq.'+encodeURIComponent(username)+'&limit=1');
     return data[0] || null;
   },
   async getAllUsers() {
-    return await sb('user_master', 'GET', null, '?order=created_at.asc');
+    return await sb('user_master','GET',null,'?order=created_at.asc');
   },
   async createUser(d) {
-    const row = await sb('user_master', 'POST', {
-      username: d.username, password_hash: d.password,
-      display_name: d.display_name, role: d.role, status: d.status || 'ACTIVE'
-    });
-    return { success: true, data: row };
+    await sb('user_master','POST',{username:d.username,password_hash:d.password,display_name:d.display_name,role:d.role,status:d.status||'ACTIVE'});
+    return {success:true};
   },
   async updateUser(id, d) {
-    const row = await sb('user_master', 'PATCH', d, `?id=eq.${id}`);
-    return { success: true, data: row };
+    await sb('user_master','PATCH',d,'?id=eq.'+id);
+    return {success:true};
   },
   async deleteUser(id) {
-    await sb('user_master', 'DELETE', null, `?id=eq.${id}`);
-    return { success: true };
+    await sb('user_master','DELETE',null,'?id=eq.'+id);
+    return {success:true};
   },
+
+  // ── MASTERS ──
   async getPartyMaster() {
     const rows = await sb('party_master', 'GET', null, '?order=party_name.asc');
     return rows.map(r => ({ ...r, Party_ID: r.id, Party_Name: r.party_name, Contact: r.contact, GST: r.gst, Status: r.status }));
@@ -1046,7 +1030,7 @@ const SB = {
       const num = parseInt(last.split('/')[2]||'0') + 1;
       soNumber = 'SFMPL/080/' + String(num).padStart(3,'0');
     }
-    const row = await sb('so_master', 'POST', { so_number: soNumber, party_id: d.Party_ID, from_id: d.From_ID, to_id: d.To_ID, mt, rate_given: pr, given_labour_type: d.Given_Labour_Type, rate_received: lr, rec_labour_type: d.Rec_Labour_Type, loading_charge: lc, effective_given: effParty, effective_rec: effLorry, margin_per_mt: marginMT, total_margin: totalMargin, converted: d.Converted, status: d.Status||'ACTIVE', remarks: d.Remarks||'', allocated: false, documentation_status: false, mf_status: false, unloading_status: false, profit_status: false, created_by: d.Created_By||(auth.user ? auth.user.username : 'Admin') });
+    const row = await sb('so_master', 'POST', { so_number: soNumber, party_id: d.Party_ID, from_id: d.From_ID, to_id: d.To_ID, mt, rate_given: pr, given_labour_type: d.Given_Labour_Type, rate_received: lr, rec_labour_type: d.Rec_Labour_Type, loading_charge: lc, effective_given: effParty, effective_rec: effLorry, margin_per_mt: marginMT, total_margin: totalMargin, converted: d.Converted, status: d.Status||'ACTIVE', remarks: d.Remarks||'', allocated: false, documentation_status: false, mf_status: false, unloading_status: false, profit_status: false, created_by: d.Created_By||(auth.user?auth.user.username:'admin') });
     return { success: true, id: row[0]?.id, SO_Number: soNumber };
   },
   async updateSOStatus(d) {
@@ -1070,7 +1054,7 @@ const SB = {
     if (existing.length > 0) {
       await sb('trip_dispatch_master', 'PATCH', { lorry_no: d.Lorry_No, consignor: d.Consignor, consignee: d.Consignee, broker_id: d.Broker_ID, broker_acc: d.Broker_Acc, broker_ifsc: d.Broker_IFSC, bal_acc: d.Bal_Acc, bal_ifsc: d.Bal_IFSC, broker_contact: d.Broker_Contact, driver_contact: d.Driver_Contact, trip_status: 'RUNNING' }, '?so_id=eq.' + d.SO_ID);
     } else {
-      await sb('trip_dispatch_master', 'POST', { so_id: d.SO_ID, so_number: d.SO_Number, lorry_no: d.Lorry_No, consignor: d.Consignor, consignee: d.Consignee, broker_id: d.Broker_ID, broker_acc: d.Broker_Acc, broker_ifsc: d.Broker_IFSC, bal_acc: d.Bal_Acc, bal_ifsc: d.Bal_IFSC, broker_contact: d.Broker_Contact, driver_contact: d.Driver_Contact, trip_status: 'RUNNING', dispatch_status: 'PENDING', created_by: d.Created_By||(auth.user ? auth.user.username : 'Admin') });
+      await sb('trip_dispatch_master', 'POST', { so_id: d.SO_ID, so_number: d.SO_Number, lorry_no: d.Lorry_No, consignor: d.Consignor, consignee: d.Consignee, broker_id: d.Broker_ID, broker_acc: d.Broker_Acc, broker_ifsc: d.Broker_IFSC, bal_acc: d.Bal_Acc, bal_ifsc: d.Bal_IFSC, broker_contact: d.Broker_Contact, driver_contact: d.Driver_Contact, trip_status: 'RUNNING', dispatch_status: 'PENDING', created_by: d.Created_By||(auth.user?auth.user.username:'admin') });
     }
     await sb('so_master', 'PATCH', { allocated: true }, '?id=eq.' + d.SO_ID);
     return { success: true };
@@ -1086,7 +1070,7 @@ const SB = {
     if (existing.length > 0) {
       await sb('trip_dispatch_master', 'PATCH', updates, '?so_id=eq.' + d.SO_ID);
     } else {
-      await sb('trip_dispatch_master', 'POST', { so_id: d.SO_ID, so_number: d.SO_Number, lorry_no: d.Lorry_No||'', trip_status: 'RUNNING', ...updates, created_by: d.Created_By||(auth.user ? auth.user.username : 'Admin') });
+      await sb('trip_dispatch_master', 'POST', { so_id: d.SO_ID, so_number: d.SO_Number, lorry_no: d.Lorry_No||'', trip_status: 'RUNNING', ...updates, created_by: d.Created_By||(auth.user?auth.user.username:'admin') });
     }
     await sb('so_master', 'PATCH', { documentation_status: true }, '?id=eq.' + d.SO_ID);
     return { success: true };
@@ -1109,7 +1093,7 @@ const SB = {
     const totalExp = ll+food+con+unl+xerox+det+ep+oc;
     const extraLabour = parseFloat(d.Extra_Labour)||0, totalCost = freightMF+totalExp+extraLabour;
     const billPmt = parseFloat(d.Bill_Pmt)||0, biltiFrt = billPmt*finalMT;
-    await sb('mf_master', 'POST', { mf_no: d.MF_No, so_id: d.SO_ID, so_number: d.SO_Number, lorry_no: d.Lorry_No, pmt_rate: pmtRate, final_mt: finalMT, total_freight: totalFreight, other_expense: otherExp, l_m: lm, p_m: pm, freight_mf: freightMF, advance: adv, diesel: diesel, diesel_paid: parseFloat(d.Diesel_Paid)||0, diesel_payment_type: d.Diesel_Payment_Type, diesel_ref: d.Diesel_Ref, diesel_card: d.Diesel_Card, other: other, balance: balance, loading_labour: ll, fooding: food, con: con, unloading: unl, xerox: xerox, detention: det, extra_point: ep, other_chrg: oc, total_exp: totalExp, extra_labour: extraLabour, total_cost: totalCost, bill_pmt: billPmt, bilti_freight: biltiFrt, created_by: d.Created_By||(auth.user ? auth.user.username : 'Admin') });
+    await sb('mf_master', 'POST', { mf_no: d.MF_No, so_id: d.SO_ID, so_number: d.SO_Number, lorry_no: d.Lorry_No, pmt_rate: pmtRate, final_mt: finalMT, total_freight: totalFreight, other_expense: otherExp, l_m: lm, p_m: pm, freight_mf: freightMF, advance: adv, diesel: diesel, diesel_paid: parseFloat(d.Diesel_Paid)||0, diesel_payment_type: d.Diesel_Payment_Type, diesel_ref: d.Diesel_Ref, diesel_card: d.Diesel_Card, other: other, balance: balance, loading_labour: ll, fooding: food, con: con, unloading: unl, xerox: xerox, detention: det, extra_point: ep, other_chrg: oc, total_exp: totalExp, extra_labour: extraLabour, total_cost: totalCost, bill_pmt: billPmt, bilti_freight: biltiFrt, created_by: d.Created_By||(auth.user?auth.user.username:'admin') });
     await sb('so_master', 'PATCH', { mf_status: true }, '?id=eq.' + d.SO_ID);
     return { success: true };
   },
@@ -1125,7 +1109,7 @@ const SB = {
 
   // ── UNLOADING ──
   async saveUnloadingData(d) {
-    await sb('unloading_master', 'POST', { so_id: d.SO_ID, so_number: d.SO_Number, mf_no: d.MF_No, lorry_no: d.Lorry_No, unloading_date: d.Unloading_Date, created_by: d.Created_By||(auth.user ? auth.user.username : 'Admin') });
+    await sb('unloading_master', 'POST', { so_id: d.SO_ID, so_number: d.SO_Number, mf_no: d.MF_No, lorry_no: d.Lorry_No, unloading_date: d.Unloading_Date, created_by: d.Created_By||(auth.user?auth.user.username:'admin') });
     await sb('so_master', 'PATCH', { unloading_status: true }, '?id=eq.' + d.SO_ID);
     return { success: true };
   },
@@ -1137,7 +1121,7 @@ const SB = {
     const grossProfit = bilti-cost-deduct;
     const gpSale = totalRev>0 ? Math.round((totalRev-cost)/totalRev*100) : 0;
     const gpPurchase = cost>0 ? Math.round((grossProfit/cost)*100) : 0;
-    await sb('profit_master', 'POST', { so_id: d.SO_ID, so_number: d.SO_Number, mf_no: d.MF_No, bilti_freight: bilti, extra_chrg: extra, total_revenue: totalRev, total_cost: cost, deduction: deduct, gross_profit: grossProfit, gp_on_sale: gpSale, gp_on_purchase: gpPurchase, created_by: d.Created_By||(auth.user ? auth.user.username : 'Admin') });
+    await sb('profit_master', 'POST', { so_id: d.SO_ID, so_number: d.SO_Number, mf_no: d.MF_No, bilti_freight: bilti, extra_chrg: extra, total_revenue: totalRev, total_cost: cost, deduction: deduct, gross_profit: grossProfit, gp_on_sale: gpSale, gp_on_purchase: gpPurchase, created_by: d.Created_By||(auth.user?auth.user.username:'admin') });
     await sb('so_master', 'PATCH', { profit_status: true }, '?id=eq.' + d.SO_ID);
     return { success: true };
   },
@@ -1162,7 +1146,7 @@ const SB = {
     if (existing.length > 0) {
       await sb('account_master', 'PATCH', { adv_paid_amount: d.Adv_Paid_Amount, adv_txn_id: d.Adv_Txn_ID, adv_status: 'ADV_PAID', overall_status: 'BAL_PENDING' }, '?mf_no=eq.' + encodeURIComponent(d.MF_No));
     } else {
-      await sb('account_master', 'POST', { mf_no: d.MF_No, so_id: d.SO_ID||'', so_number: d.SO_Number||'', lorry_no: d.Lorry_No||'', loading_date: d.Loading_Date||null, broker_id: d.Broker_ID||'', broker_name: d.Broker_Name||'', adv_acc_no: d.Adv_Acc_No||'', adv_ifsc: d.Adv_IFSC||'', bal_acc_no: d.Bal_Acc_No||'', bal_ifsc: d.Bal_IFSC||'', advance_amount: d.Advance_Amount||0, balance_amount: d.Balance_Amount||0, adv_paid_amount: d.Adv_Paid_Amount, adv_txn_id: d.Adv_Txn_ID, bal_paid_amount: 0, bal_txn_id: '', adv_status: 'ADV_PAID', bal_status: 'PENDING', overall_status: 'BAL_PENDING', created_by: d.Created_By||(auth.user ? auth.user.username : 'Admin') });
+      await sb('account_master', 'POST', { mf_no: d.MF_No, so_id: d.SO_ID||'', so_number: d.SO_Number||'', lorry_no: d.Lorry_No||'', loading_date: d.Loading_Date||null, broker_id: d.Broker_ID||'', broker_name: d.Broker_Name||'', adv_acc_no: d.Adv_Acc_No||'', adv_ifsc: d.Adv_IFSC||'', bal_acc_no: d.Bal_Acc_No||'', bal_ifsc: d.Bal_IFSC||'', advance_amount: d.Advance_Amount||0, balance_amount: d.Balance_Amount||0, adv_paid_amount: d.Adv_Paid_Amount, adv_txn_id: d.Adv_Txn_ID, bal_paid_amount: 0, bal_txn_id: '', adv_status: 'ADV_PAID', bal_status: 'PENDING', overall_status: 'BAL_PENDING', created_by: d.Created_By||(auth.user?auth.user.username:'admin') });
     }
     return { success: true };
   },
@@ -1758,7 +1742,7 @@ async function saveSO() {
     Converted: converted,
     Status: document.getElementById('so-status').value,
     Remarks: remarks,
-    Created_By: (auth.user ? auth.user.username : 'Admin')
+    Created_By: (auth.user?auth.user.username:'admin')
   };
   try {
     const result = await call('saveSOData', data);
@@ -2101,7 +2085,7 @@ async function saveTrip() {
     Bal_IFSC: document.getElementById('op-bal-ifsc').value,
     Broker_Contact: document.getElementById('op-broker-contact').value,
     Driver_Contact: document.getElementById('op-driver-contact').value,
-    Created_By: (auth.user ? auth.user.username : 'Admin')
+    Created_By: (auth.user?auth.user.username:'admin')
   };
   try {
     const r = await call('saveTripData', data);
@@ -2349,7 +2333,7 @@ async function saveDispatch() {
     PKGS: document.getElementById('dp-pkgs-type').value,
     Articles: document.getElementById('dp-articles').value,
     Final_MT: document.getElementById('dp-final-mt').value,
-    Created_By: (auth.user ? auth.user.username : 'Admin')
+    Created_By: (auth.user?auth.user.username:'admin')
   };
   try {
     const r = await call('saveDispatchData', data);
@@ -2606,7 +2590,7 @@ async function saveMF() {
     Unloading:v('mf-unload'), Xerox:v('mf-xerox'), Detention:v('mf-detention'),
     Extra_Point:v('mf-extra-pt'), Other_Chrg:v('mf-other-chrg'),
     Extra_Labour:v('mf-extra-labour'), Bill_Pmt:v('mf-bill-pmt'),
-    Created_By: (auth.user ? auth.user.username : 'Admin')
+    Created_By:(auth.user?auth.user.username:'admin')
   };
   try {
     const r = await call('saveMFData', data);
@@ -2857,7 +2841,7 @@ async function saveUnloading() {
       MF_No: mf.MF_ID || '',
       Lorry_No: trip.Lorry_No || '',
       Unloading_Date: date,
-      Created_By: (auth.user ? auth.user.username : 'Admin')
+      Created_By: (auth.user?auth.user.username:'admin')
     };
     const r = await call('saveUnloadingData', data);
     if (r && r.success) {
@@ -3067,7 +3051,7 @@ async function saveProfit() {
     Extra_Chrg: document.getElementById('pf-extra').value,
     Total_Cost: document.getElementById('pf-total-cost').value,
     Deduction: document.getElementById('pf-deduction').value,
-    Created_By: (auth.user ? auth.user.username : 'Admin')
+    Created_By:(auth.user?auth.user.username:'admin')
   };
   try {
     const r = await call('saveProfitData', data);
@@ -3908,7 +3892,7 @@ async function submitAdvancePayment() {
   const btn = document.getElementById('btn-adv-submit');
   btn.disabled = true; btn.textContent = '⏳ Saving...';
   try {
-    const r = await call('saveAdvancePayment', { ..._acctCurrentMF, Adv_Paid_Amount: amt, Adv_Txn_ID: txnId, Created_By: (auth.user ? auth.user.username : 'Admin') });
+    const r = await call('saveAdvancePayment', { ..._acctCurrentMF, Adv_Paid_Amount: amt, Adv_Txn_ID: txnId, Created_By: (auth.user?auth.user.username:'admin') });
     if (r && r.success) {
       toast('Advance payment saved! Balance card unlocked. ✅');
       document.getElementById('adv-card-status').textContent = '✅ Adv Paid ₹'+fmt(amt);
@@ -4601,13 +4585,14 @@ function exportRptCSV() {
   toast('CSV downloaded ✓');
 }
 
+
 // =============================================
 // AUTH FUNCTIONS
 // =============================================
 async function doLogin() {
-  const username = document.getElementById('login-username').value.trim();
-  const password = document.getElementById('login-password').value;
-  const errEl    = document.getElementById('login-error');
+  var username = document.getElementById('login-username').value.trim();
+  var password = document.getElementById('login-password').value;
+  var errEl    = document.getElementById('login-error');
   errEl.style.display = 'none';
 
   if (!username || !password) {
@@ -4617,7 +4602,7 @@ async function doLogin() {
   }
 
   try {
-    const user = await SB.getUserByUsername(username);
+    var user = await SB.getUserByUsername(username);
     if (!user) {
       errEl.textContent = 'Invalid username or password.';
       errEl.style.display = 'block';
@@ -4628,37 +4613,30 @@ async function doLogin() {
       errEl.style.display = 'block';
       return;
     }
-    // Simple plain-text password check (store hashed in production)
     if (user.password_hash !== password) {
       errEl.textContent = 'Invalid username or password.';
       errEl.style.display = 'block';
       return;
     }
-
-    // Success — store session
+    // Login success
     auth.user = {
       id:           user.id,
       username:     user.username,
       role:         user.role,
       display_name: user.display_name || user.username
     };
-    sessionStorage.setItem('tms_auth', JSON.stringify(auth.user));
+    try { sessionStorage.setItem('tms_auth', JSON.stringify(auth.user)); } catch(e) {}
 
-    // Update topbar
-    const initials = auth.user.display_name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
+    var initials = auth.user.display_name.split(' ').map(function(w){return w[0]||'';}).join('').toUpperCase().slice(0,2) || 'U';
     document.getElementById('topbar-avatar').textContent   = initials;
     document.getElementById('topbar-username').textContent = auth.user.display_name;
 
-    // Show admin nav
     if (auth.isAdmin()) {
       document.getElementById('nav-usermgmt').style.display = 'block';
     }
-
-    // Hide login screen
     document.getElementById('login-screen').style.display = 'none';
 
-    // Boot app
-    await loadMasters().catch(() => {});
+    await loadMasters().catch(function() {});
     navigate('dashboard');
 
   } catch(e) {
@@ -4668,135 +4646,106 @@ async function doLogin() {
 }
 
 function doLogout() {
-  sessionStorage.removeItem('tms_auth');
+  try { sessionStorage.removeItem('tms_auth'); } catch(e) {}
   auth.user = null;
-  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('login-screen').style.display  = 'flex';
   document.getElementById('login-username').value = '';
   document.getElementById('login-password').value = '';
-  document.getElementById('login-error').style.display = 'none';
-  document.getElementById('nav-usermgmt').style.display = 'none';
+  document.getElementById('login-error').style.display   = 'none';
+  document.getElementById('nav-usermgmt').style.display  = 'none';
+  document.getElementById('topbar-avatar').textContent   = 'AD';
+  document.getElementById('topbar-username').textContent = 'Admin';
 }
 
 // =============================================
 // USER MANAGEMENT (Admin Only)
 // =============================================
-let _editingUserId = null;
+var _editingUserId = null;
 
 async function renderUserMgmt() {
   if (!auth.isAdmin()) {
-    setContent('<div class="loading">⛔ Access denied. Admins only.</div>');
+    setContent('<div class="loading">Access denied. Admins only.</div>');
     return;
   }
-
   setContent('<div class="loading"><span class="spinner"></span>Loading users...</div>');
 
-  let users = [];
-  try { users = await SB.getAllUsers(); } catch(e) { toast('Failed to load users: ' + e.message, 'error'); }
+  var users = [];
+  try { users = await SB.getAllUsers(); } catch(e) { toast('Failed to load users: '+e.message,'error'); }
 
-  const rows = users.map(u => {
-    const roleBadge = u.role === 'ADMIN'
-      ? `<span class="user-role-badge urb-admin">ADMIN</span>`
-      : `<span class="user-role-badge urb-user">USER</span>`;
-    const statusBadge = u.status === 'ACTIVE'
-      ? `<span class="badge b-yes">ACTIVE</span>`
-      : `<span class="badge b-no">INACTIVE</span>`;
-    const isSelf = auth.user && u.id === auth.user.id;
-    return `<tr>
-      <td style="font-family:var(--mono);font-size:11px">${u.id}</td>
-      <td><strong>${u.username}</strong>${isSelf ? ' <span style="color:var(--ink4);font-size:10px">(you)</span>' : ''}</td>
-      <td>${u.display_name || '—'}</td>
-      <td>${roleBadge}</td>
-      <td>${statusBadge}</td>
-      <td>${u.created_at ? u.created_at.slice(0,10) : '—'}</td>
-      <td style="text-align:right">
-        <button class="btn btn-outline btn-sm" onclick="editUser(${u.id},'${u.username}','${u.display_name||''}','${u.role}','${u.status}')">✎ Edit</button>
-        ${!isSelf ? `<button class="btn btn-danger btn-sm" style="margin-left:4px" onclick="deleteUser(${u.id},'${u.username}')">✕</button>` : ''}
-      </td>
-    </tr>`;
+  var rows = users.map(function(u, idx) {
+    var roleBadge   = u.role==='ADMIN'
+      ? '<span class="user-role-badge urb-admin">ADMIN</span>'
+      : '<span class="user-role-badge urb-user">USER</span>';
+    var statusBadge = u.status==='ACTIVE'
+      ? '<span class="badge b-yes">ACTIVE</span>'
+      : '<span class="badge b-no">INACTIVE</span>';
+    var isSelf = auth.user && u.id===auth.user.id;
+    return '<tr>'
+      +'<td style="font-family:var(--mono);font-size:11px">'+u.id+'</td>'
+      +'<td><strong>'+u.username+'</strong>'+(isSelf?' <span style="color:var(--ink4);font-size:10px">(you)</span>':'')+'</td>'
+      +'<td>'+(u.display_name||'—')+'</td>'
+      +'<td>'+roleBadge+'</td>'
+      +'<td>'+statusBadge+'</td>'
+      +'<td>'+(u.created_at?u.created_at.slice(0,10):'—')+'</td>'
+      +'<td style="text-align:right">'
+      +'<button class="btn btn-outline btn-sm" onclick="_umEdit('+idx+')">&#9998; Edit</button>'
+      +(!isSelf?'<button class="btn btn-danger btn-sm" style="margin-left:4px" onclick="_umDel('+idx+')">&#10005;</button>':'')
+      +'</td></tr>';
   }).join('');
+  window._umUsers = users;
 
-  setContent(`
-    <div class="section-card">
-      <div class="section-title">
-        <span>👤 User Management</span>
-        <button class="btn btn-primary btn-sm" onclick="showAddUserForm()">+ Add User</button>
-      </div>
+  setContent(
+    '<div class="section-card">'
+    +'<div class="section-title"><span>&#128100; User Management</span>'
+    +'<button class="btn btn-primary btn-sm" onclick="showAddUserForm()">+ Add User</button></div>'
 
-      <div id="user-form-wrap" style="display:none;margin-bottom:18px;padding:16px;background:var(--canvas);border:1px solid var(--border);border-radius:4px">
-        <div style="font-size:11px;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px" id="user-form-title">Add New User</div>
-        <div class="form-grid-2">
-          <div class="form-group">
-            <label>Username *</label>
-            <input type="text" id="uf-username" placeholder="e.g. rahul123">
-          </div>
-          <div class="form-group">
-            <label>Display Name *</label>
-            <input type="text" id="uf-displayname" placeholder="e.g. Rahul Sharma">
-          </div>
-          <div class="form-group">
-            <label id="uf-pw-label">Password *</label>
-            <input type="password" id="uf-password" placeholder="Enter password">
-          </div>
-          <div class="form-group">
-            <label>Role</label>
-            <select id="uf-role">
-              <option value="USER">USER</option>
-              <option value="ADMIN">ADMIN</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Status</label>
-            <select id="uf-status">
-              <option value="ACTIVE">ACTIVE</option>
-              <option value="INACTIVE">INACTIVE</option>
-            </select>
-          </div>
-        </div>
-        <div class="form-actions" style="margin-top:12px">
-          <button class="btn btn-outline btn-sm" onclick="cancelUserForm()">Cancel</button>
-          <button class="btn btn-primary btn-sm" onclick="saveUser()">Save User</button>
-        </div>
-      </div>
+    +'<div id="user-form-wrap" style="display:none;margin-bottom:18px;padding:16px;background:var(--canvas);border:1px solid var(--border);border-radius:4px">'
+    +'<div style="font-size:11px;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px" id="user-form-title">Add New User</div>'
+    +'<div class="form-grid-2">'
+    +'<div class="form-group"><label>Username *</label><input type="text" id="uf-username" placeholder="e.g. rahul123"></div>'
+    +'<div class="form-group"><label>Display Name *</label><input type="text" id="uf-displayname" placeholder="e.g. Rahul Sharma"></div>'
+    +'<div class="form-group"><label id="uf-pw-label">Password *</label><input type="password" id="uf-password" placeholder="Enter password"></div>'
+    +'<div class="form-group"><label>Role</label><select id="uf-role"><option value="USER">USER</option><option value="ADMIN">ADMIN</option></select></div>'
+    +'<div class="form-group"><label>Status</label><select id="uf-status"><option value="ACTIVE">ACTIVE</option><option value="INACTIVE">INACTIVE</option></select></div>'
+    +'</div>'
+    +'<div class="form-actions" style="margin-top:12px">'
+    +'<button class="btn btn-outline btn-sm" onclick="cancelUserForm()">Cancel</button>'
+    +'<button class="btn btn-primary btn-sm" onclick="saveUser()">Save User</button>'
+    +'</div></div>'
 
-      <div class="table-wrap">
-        <table>
-          <thead><tr>
-            <th>ID</th><th>Username</th><th>Display Name</th>
-            <th>Role</th><th>Status</th><th>Created</th><th style="text-align:right">Actions</th>
-          </tr></thead>
-          <tbody>${rows || '<tr><td colspan="7" class="loading">No users found</td></tr>'}</tbody>
-        </table>
-      </div>
-    </div>
-  `);
+    +'<div class="table-wrap"><table>'
+    +'<thead><tr><th>ID</th><th>Username</th><th>Display Name</th><th>Role</th><th>Status</th><th>Created</th><th style="text-align:right">Actions</th></tr></thead>'
+    +'<tbody>'+(rows||'<tr><td colspan="7" class="loading">No users found</td></tr>')+'</tbody>'
+    +'</table></div></div>'
+  );
 }
 
 function showAddUserForm() {
   _editingUserId = null;
-  document.getElementById('user-form-title').textContent = 'Add New User';
-  document.getElementById('uf-username').value    = '';
-  document.getElementById('uf-username').disabled = false;
-  document.getElementById('uf-displayname').value = '';
-  document.getElementById('uf-password').value    = '';
-  document.getElementById('uf-password').placeholder = 'Enter password';
-  document.getElementById('uf-pw-label').textContent  = 'Password *';
-  document.getElementById('uf-role').value   = 'USER';
-  document.getElementById('uf-status').value = 'ACTIVE';
-  document.getElementById('user-form-wrap').style.display = 'block';
+  document.getElementById('user-form-title').textContent     = 'Add New User';
+  document.getElementById('uf-username').value               = '';
+  document.getElementById('uf-username').disabled            = false;
+  document.getElementById('uf-displayname').value           = '';
+  document.getElementById('uf-password').value              = '';
+  document.getElementById('uf-password').placeholder        = 'Enter password';
+  document.getElementById('uf-pw-label').textContent        = 'Password *';
+  document.getElementById('uf-role').value                  = 'USER';
+  document.getElementById('uf-status').value                = 'ACTIVE';
+  document.getElementById('user-form-wrap').style.display   = 'block';
 }
 
 function editUser(id, username, displayName, role, status) {
   _editingUserId = id;
-  document.getElementById('user-form-title').textContent = 'Edit User — ' + username;
-  document.getElementById('uf-username').value    = username;
-  document.getElementById('uf-username').disabled = true;
-  document.getElementById('uf-displayname').value = displayName;
-  document.getElementById('uf-password').value    = '';
-  document.getElementById('uf-password').placeholder = 'Leave blank to keep current';
-  document.getElementById('uf-pw-label').textContent  = 'New Password (optional)';
-  document.getElementById('uf-role').value   = role;
-  document.getElementById('uf-status').value = status;
-  document.getElementById('user-form-wrap').style.display = 'block';
+  document.getElementById('user-form-title').textContent     = 'Edit User — '+username;
+  document.getElementById('uf-username').value               = username;
+  document.getElementById('uf-username').disabled            = true;
+  document.getElementById('uf-displayname').value           = displayName;
+  document.getElementById('uf-password').value              = '';
+  document.getElementById('uf-password').placeholder        = 'Leave blank to keep current';
+  document.getElementById('uf-pw-label').textContent        = 'New Password (optional)';
+  document.getElementById('uf-role').value                  = role;
+  document.getElementById('uf-status').value                = status;
+  document.getElementById('user-form-wrap').style.display   = 'block';
   document.getElementById('user-form-wrap').scrollIntoView({behavior:'smooth'});
 }
 
@@ -4806,83 +4755,86 @@ function cancelUserForm() {
 }
 
 async function saveUser() {
-  const username    = document.getElementById('uf-username').value.trim();
-  const displayName = document.getElementById('uf-displayname').value.trim();
-  const password    = document.getElementById('uf-password').value;
-  const role        = document.getElementById('uf-role').value;
-  const status      = document.getElementById('uf-status').value;
+  var username    = document.getElementById('uf-username').value.trim();
+  var displayName = document.getElementById('uf-displayname').value.trim();
+  var password    = document.getElementById('uf-password').value;
+  var role        = document.getElementById('uf-role').value;
+  var status      = document.getElementById('uf-status').value;
 
-  if (!displayName) { toast('Display name required', 'error'); return; }
+  if (!displayName) { toast('Display name required','error'); return; }
 
   try {
     if (_editingUserId) {
-      // Update
-      const updates = { display_name: displayName, role, status };
+      var updates = {display_name:displayName, role:role, status:status};
       if (password) updates.password_hash = password;
       await SB.updateUser(_editingUserId, updates);
-
-      // If editing self, update local auth
       if (auth.user && auth.user.id === _editingUserId) {
         auth.user.display_name = displayName;
         auth.user.role = role;
-        sessionStorage.setItem('tms_auth', JSON.stringify(auth.user));
-        const initials = displayName.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
-        document.getElementById('topbar-avatar').textContent   = initials;
+        try { sessionStorage.setItem('tms_auth', JSON.stringify(auth.user)); } catch(e) {}
+        var ini = displayName.split(' ').map(function(w){return w[0]||'';}).join('').toUpperCase().slice(0,2);
+        document.getElementById('topbar-avatar').textContent   = ini;
         document.getElementById('topbar-username').textContent = displayName;
       }
       toast('User updated ✓');
     } else {
-      // Create
-      if (!username) { toast('Username required', 'error'); return; }
-      if (!password) { toast('Password required', 'error'); return; }
-      await SB.createUser({ username, password, display_name: displayName, role, status });
+      if (!username) { toast('Username required','error'); return; }
+      if (!password) { toast('Password required','error'); return; }
+      await SB.createUser({username:username, password:password, display_name:displayName, role:role, status:status});
       toast('User created ✓');
     }
     await renderUserMgmt();
-  } catch(e) { toast('Failed: ' + e.message, 'error'); }
+  } catch(e) { toast('Failed: '+e.message,'error'); }
 }
 
 async function deleteUser(id, username) {
-  if (!confirm(`Delete user "${username}"? This cannot be undone.`)) return;
+  if (!confirm('Delete user "'+username+'"? This cannot be undone.')) return;
   try {
     await SB.deleteUser(id);
     toast('User deleted ✓');
     await renderUserMgmt();
-  } catch(e) { toast('Failed: ' + e.message, 'error'); }
+  } catch(e) { toast('Failed: '+e.message,'error'); }
+}
+
+function _umEdit(idx) {
+  var u = window._umUsers[idx];
+  if (!u) return;
+  editUser(u.id, u.username, u.display_name||'', u.role, u.status);
+}
+async function _umDel(idx) {
+  var u = window._umUsers[idx];
+  if (!u) return;
+  await deleteUser(u.id, u.username);
 }
 
 // =============================================
 // BOOT
 // =============================================
 window.onload = function() {
-  // Check for saved session
-  const saved = sessionStorage.getItem('tms_auth');
+  var saved = null;
+  try { saved = sessionStorage.getItem('tms_auth'); } catch(e) {}
   if (saved) {
     try {
       auth.user = JSON.parse(saved);
-      // Restore topbar
-      const initials = auth.user.display_name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
-      document.getElementById('topbar-avatar').textContent   = initials;
+      var ini = auth.user.display_name.split(' ').map(function(w){return w[0]||'';}).join('').toUpperCase().slice(0,2) || 'U';
+      document.getElementById('topbar-avatar').textContent   = ini;
       document.getElementById('topbar-username').textContent = auth.user.display_name;
-      if (auth.isAdmin()) {
-        document.getElementById('nav-usermgmt').style.display = 'block';
-      }
-      // Hide login, boot app
+      if (auth.isAdmin()) document.getElementById('nav-usermgmt').style.display = 'block';
       document.getElementById('login-screen').style.display = 'none';
       renderDashboard();
-      loadMasters().catch(() => {});
+      loadMasters().catch(function() {});
       return;
     } catch(e) {
-      sessionStorage.removeItem('tms_auth');
+      try { sessionStorage.removeItem('tms_auth'); } catch(e2) {}
     }
   }
-  // Show login screen (already visible by default)
-  // Focus username field
-  setTimeout(() => {
-    const el = document.getElementById('login-username');
+  // Show login - focus username
+  setTimeout(function() {
+    var el = document.getElementById('login-username');
     if (el) el.focus();
-  }, 100);
+  }, 150);
 };
+
 </script>
 </body>
 </html>
