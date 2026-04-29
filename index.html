@@ -1061,8 +1061,12 @@ const SB = {
   },
   async getTripData(page) {
     page = page || 1;
+    const countRes = await fetch(SUPABASE_URL + '/rest/v1/trip_dispatch_master?select=count', {
+      headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON, 'Prefer': 'count=exact', 'Range': '0-0' }
+    });
+    const total = parseInt(countRes.headers.get('content-range')?.split('/')[1] || '0');
     const rows = await sb('trip_dispatch_master', 'GET', null, '?order=id.desc&limit=50&offset='+((page-1)*50));
-    return { data: rows.map(r => ({ ...r, SO_Number: r.so_number, Lorry_No: r.lorry_no, Trip_Status: r.trip_status })), total: rows.length, page };
+    return { data: rows.map(r => ({ ...r, SO_Number: r.so_number, Lorry_No: r.lorry_no, Trip_Status: r.trip_status })), total, page };
   },
   async saveDispatchData(d) {
     const updates = { loading_date: d.Loading_Date, gc_no: d.GC_No, invoice_no: d.Invoice_No, eway_bill_no: d.Eway_Bill_No, eway_expiry: d.Eway_Expiry, destination_gc: d.Destination_GC, items: d.Items, pkgs: d.PKGS, articles: d.Articles, final_mt: d.Final_MT, dispatch_status: 'DISPATCHED' };
@@ -1077,8 +1081,12 @@ const SB = {
   },
   async getDispatchData(page) {
     page = page || 1;
+    const countRes = await fetch(SUPABASE_URL + '/rest/v1/trip_dispatch_master?dispatch_status=eq.DISPATCHED&select=count', {
+      headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON, 'Prefer': 'count=exact', 'Range': '0-0' }
+    });
+    const total = parseInt(countRes.headers.get('content-range')?.split('/')[1] || '0');
     const rows = await sb('trip_dispatch_master', 'GET', null, '?dispatch_status=eq.DISPATCHED&order=id.desc&limit=50&offset='+((page-1)*50));
-    return { data: rows.map(r => ({ ...r, SO_Number: r.so_number, Lorry_No: r.lorry_no, GC_No: r.gc_no, Eway_Bill_No: r.eway_bill_no, Final_MT: r.final_mt, PKGS: r.pkgs, Items: r.items })), total: rows.length, page };
+    return { data: rows.map(r => ({ ...r, SO_Number: r.so_number, Lorry_No: r.lorry_no, GC_No: r.gc_no, Eway_Bill_No: r.eway_bill_no, Final_MT: r.final_mt, PKGS: r.pkgs, Items: r.items })), total, page };
   },
 
   // ── MF ──
@@ -1099,8 +1107,12 @@ const SB = {
   },
   async getMFData(page) {
     page = page || 1;
+    const countRes = await fetch(SUPABASE_URL + '/rest/v1/mf_master?select=count', {
+      headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON, 'Prefer': 'count=exact', 'Range': '0-0' }
+    });
+    const total = parseInt(countRes.headers.get('content-range')?.split('/')[1] || '0');
     const rows = await sb('mf_master', 'GET', null, '?order=id.desc&limit=50&offset='+((page-1)*50));
-    return { data: rows.map(r => ({ ...r, SO_Number: r.so_number, Lorry_No: r.lorry_no, Total_Freight: r.total_freight, Total_Cost: r.total_cost, Bilti_Freight: r.bilti_freight })), total: rows.length, page };
+    return { data: rows.map(r => ({ ...r, SO_Number: r.so_number, Lorry_No: r.lorry_no, Total_Freight: r.total_freight, Total_Cost: r.total_cost, Bilti_Freight: r.bilti_freight })), total, page };
   },
   async getMFBySO(soId) {
     const rows = await sb('mf_master', 'GET', null, '?so_id=eq.' + soId + '&limit=1');
@@ -2728,11 +2740,18 @@ async function loadUnloadingTracking() {
   }
 }
 
-function renderUnloadingTable(rows) {
+// _ulFilteredRows holds the currently-filtered dataset (used by pagination)
+let _ulFilteredRows = null;
+
+function renderUnloadingTable(rows, page) {
+  if (rows !== undefined && rows !== null) _ulFilteredRows = rows;
+  const data = _ulFilteredRows || _ulAllRows || [];
+  if (page !== undefined) _ulPage = page;
+
   const wrap = document.getElementById('ul-tracking-wrap');
   if (!wrap) return;
 
-  if (!rows || rows.length === 0) {
+  if (!data || data.length === 0) {
     wrap.innerHTML = `<div style="text-align:center;padding:40px;color:var(--ink3)">
       <div style="font-size:32px;margin-bottom:12px">🏗️</div>
       <div style="font-weight:700">No dispatched trips found</div>
@@ -2741,7 +2760,15 @@ function renderUnloadingTable(rows) {
     return;
   }
 
-  const tableRows = rows.map(r => {
+  const totalPages = Math.max(1, Math.ceil(data.length / _UL_PAGE_SIZE));
+  _ulPage = Math.min(_ulPage, totalPages);
+  const startIdx  = (_ulPage - 1) * _UL_PAGE_SIZE;
+  const pageData  = data.slice(startIdx, startIdx + _UL_PAGE_SIZE);
+
+  const doneCount    = data.filter(r => r.Done).length;
+  const pendingCount = data.filter(r => !r.Done).length;
+
+  const tableRows = pageData.map(r => {
     const statusPill = r.Done
       ? `<span class="status-pill sp-completed">✅ Unloaded</span>`
       : `<span class="status-pill sp-pending">⏳ Pending</span>`;
@@ -2757,13 +2784,16 @@ function renderUnloadingTable(rows) {
     </tr>`;
   }).join('');
 
-  const doneCount    = rows.filter(r => r.Done).length;
-  const pendingCount = rows.filter(r => !r.Done).length;
+  const countInfo = data.length > _UL_PAGE_SIZE
+    ? `<span style="font-size:11px;color:var(--ink3);margin-left:12px">Showing ${startIdx+1}–${Math.min(startIdx+_UL_PAGE_SIZE,data.length)} of ${data.length}</span>`
+    : '';
+  const paginationHtml = renderPagination(_ulPage, totalPages, 'renderUnloadingTable');
 
   wrap.innerHTML = `
-    <div style="display:flex;gap:12px;margin-bottom:14px">
+    <div style="display:flex;gap:12px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
       <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:8px 16px;font-size:12px;font-weight:700;color:var(--green)">✅ Unloaded: ${doneCount}</div>
       <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 16px;font-size:12px;font-weight:700;color:var(--blue)">⏳ Pending: ${pendingCount}</div>
+      ${countInfo}
     </div>
     <div class="table-wrap">
       <table>
@@ -2776,7 +2806,7 @@ function renderUnloadingTable(rows) {
         </tr></thead>
         <tbody>${tableRows}</tbody>
       </table>
-    </div>`;
+    </div>${paginationHtml}`;
 }
 
 function filterUnloadingList() {
@@ -2787,6 +2817,7 @@ function filterUnloadingList() {
     const matchStatus = status === 'all' || (status === 'done' && r.Done) || (status === 'pending' && !r.Done);
     return matchSearch && matchStatus;
   });
+  _ulPage = 1; // reset to page 1 when filter changes
   renderUnloadingTable(filtered);
 }
 
@@ -3436,13 +3467,34 @@ async function renderMasters() {
 function switchMasterTab(tab, el) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
+  _masterPage[tab] = 1; // reset to page 1 on tab switch
   renderMasterTab(tab);
 }
 
-function renderMasterTab(tab) {
+function renderMasterTab(tab, page) {
+  if (page !== undefined) _masterPage[tab] = page;
   const container = document.getElementById('master-content');
+  if (!container) return;
+
+  function paginate(data, tabKey) {
+    const pg = _masterPage[tabKey] || 1;
+    const total = data.length;
+    const totalPages = Math.max(1, Math.ceil(total / _MASTER_PAGE_SIZE));
+    const clampedPg = Math.min(pg, totalPages);
+    _masterPage[tabKey] = clampedPg;
+    const start = (clampedPg - 1) * _MASTER_PAGE_SIZE;
+    return {
+      items: data.slice(start, start + _MASTER_PAGE_SIZE),
+      pager: renderPagination(clampedPg, totalPages, `function(p){renderMasterTab('${tabKey}',p)}`),
+      countInfo: total > _MASTER_PAGE_SIZE
+        ? `<div style="font-size:11px;color:var(--ink3);margin-top:8px">Showing <b>${start+1}–${Math.min(start+_MASTER_PAGE_SIZE,total)}</b> of <b>${total}</b> records</div>`
+        : ''
+    };
+  }
+
   if (tab==='party') {
-    const rows = state.parties.map(p => `<tr><td>${p.Party_ID}</td><td>${p.Party_Name}</td><td>${p.Contact}</td><td>${p.GST}</td><td><span class="badge b-yes">${p.Status}</span></td></tr>`).join('');
+    const { items, pager, countInfo } = paginate(state.parties, 'party');
+    const rows = items.map(p => `<tr><td>${p.Party_ID}</td><td>${p.Party_Name}</td><td>${p.Contact||'–'}</td><td>${p.GST||'–'}</td><td><span class="badge b-yes">${p.Status}</span></td></tr>`).join('');
     container.innerHTML = `
       <div class="form-grid-2" style="margin-bottom:14px">
         <div class="form-group"><label>Party Name *</label><input type="text" id="m-party-name"></div>
@@ -3453,10 +3505,13 @@ function renderMasterTab(tab) {
       <div class="form-actions" style="margin-top:0;border-top:none">
         <button class="btn btn-primary btn-sm" onclick="addParty()">+ Add Party</button>
       </div>
+      ${countInfo}
       <div class="table-wrap mt-8"><table><thead><tr><th>ID</th><th>Name</th><th>Contact</th><th>GST</th><th>Status</th></tr></thead><tbody>${rows||'<tr><td colspan="5" class="loading">No records</td></tr>'}</tbody></table></div>
+      ${pager}
     `;
   } else if (tab==='place') {
-    const rows = state.places.map(p => `<tr><td>${p.Place_ID}</td><td>${p.Place_Name}</td><td>${p.State_Code}</td></tr>`).join('');
+    const { items, pager, countInfo } = paginate(state.places, 'place');
+    const rows = items.map(p => `<tr><td>${p.Place_ID}</td><td>${p.Place_Name}</td><td>${p.State_Code||'–'}</td></tr>`).join('');
     container.innerHTML = `
       <div class="form-grid-2" style="margin-bottom:14px">
         <div class="form-group"><label>Place Name *</label><input type="text" id="m-place-name"></div>
@@ -3465,10 +3520,13 @@ function renderMasterTab(tab) {
       <div class="form-actions" style="margin-top:0;border-top:none">
         <button class="btn btn-primary btn-sm" onclick="addPlace()">+ Add Place</button>
       </div>
+      ${countInfo}
       <div class="table-wrap mt-8"><table><thead><tr><th>ID</th><th>Place Name</th><th>State Code</th></tr></thead><tbody>${rows||'<tr><td colspan="3" class="loading">No records</td></tr>'}</tbody></table></div>
+      ${pager}
     `;
   } else if (tab==='broker') {
-    const rows = state.brokers.map(b => `<tr><td>${b.Broker_ID}</td><td>${b.Broker_Name}</td><td>${b.Contact_No}</td><td class="mono">${b.Primary_Acc_No}</td><td class="mono">${b.IFSC}</td><td><span class="badge b-yes">${b.Status}</span></td></tr>`).join('');
+    const { items, pager, countInfo } = paginate(state.brokers, 'broker');
+    const rows = items.map(b => `<tr><td>${b.Broker_ID}</td><td>${b.Broker_Name}</td><td>${b.Contact_No||'–'}</td><td class="mono">${b.Primary_Acc_No||'–'}</td><td class="mono">${b.IFSC||'–'}</td><td><span class="badge b-yes">${b.Status}</span></td></tr>`).join('');
     container.innerHTML = `
       <div class="form-grid-2" style="margin-bottom:14px">
         <div class="form-group"><label>Broker Name *</label><input type="text" id="m-broker-name"></div>
@@ -3482,7 +3540,9 @@ function renderMasterTab(tab) {
       <div class="form-actions" style="margin-top:0;border-top:none">
         <button class="btn btn-primary btn-sm" onclick="addBroker()">+ Add Broker</button>
       </div>
+      ${countInfo}
       <div class="table-wrap mt-8"><table><thead><tr><th>ID</th><th>Name</th><th>Contact</th><th>Acc No</th><th>IFSC</th><th>Status</th></tr></thead><tbody>${rows||'<tr><td colspan="6" class="loading">No records</td></tr>'}</tbody></table></div>
+      ${pager}
     `;
   }
 }
@@ -3492,7 +3552,7 @@ async function addParty() {
   if (!name) { toast('Party name required','error'); return; }
   try {
     const r = await call('saveParty', {Party_Name:name, Contact:document.getElementById('m-party-contact').value, GST:document.getElementById('m-party-gst').value, Status:document.getElementById('m-party-status').value});
-    if (r.success) { toast('Party added!'); await loadMasters(true); renderMasterTab('party'); }
+    if (r.success) { toast('Party added!'); await loadMasters(true); _masterPage['party'] = 1; renderMasterTab('party'); }
   } catch(e) { toast('Failed: '+e,'error'); }
 }
 
@@ -3501,7 +3561,7 @@ async function addPlace() {
   if (!name) { toast('Place name required','error'); return; }
   try {
     const r = await call('savePlace', {Place_Name:name, State_Code:document.getElementById('m-place-state').value});
-    if (r.success) { toast('Place added!'); await loadMasters(true); renderMasterTab('place'); }
+    if (r.success) { toast('Place added!'); await loadMasters(true); _masterPage['place'] = 1; renderMasterTab('place'); }
   } catch(e) { toast('Failed: '+e,'error'); }
 }
 
@@ -3510,7 +3570,7 @@ async function addBroker() {
   if (!name) { toast('Broker name required','error'); return; }
   try {
     const r = await call('saveBroker', {Broker_Name:name, Contact_No:document.getElementById('m-broker-contact').value, Primary_Acc_No:document.getElementById('m-broker-acc').value, IFSC:document.getElementById('m-broker-ifsc').value, Secondary_Acc_No:document.getElementById('m-broker-acc2').value, Secondary_IFSC:document.getElementById('m-broker-ifsc2').value, Status:document.getElementById('m-broker-status').value});
-    if (r.success) { toast('Broker added!'); await loadMasters(true); renderMasterTab('broker'); }
+    if (r.success) { toast('Broker added!'); await loadMasters(true); _masterPage['broker'] = 1; renderMasterTab('broker'); }
   } catch(e) { toast('Failed: '+e,'error'); }
 }
 
@@ -3526,11 +3586,28 @@ function getPlaceName(id) {
 
 function renderPagination(current, total, fn) {
   if (total <= 1) return '';
-  let btns = `<button class="page-btn" onclick="${fn}(${Math.max(1,current-1)})">‹</button>`;
-  for (let i=1;i<=Math.min(total,7);i++) {
-    btns += `<button class="page-btn ${i===current?'active':''}" onclick="${fn}(${i})">${i}</button>`;
+  const prev = Math.max(1, current - 1);
+  const next = Math.min(total, current + 1);
+  let btns = `<button class="page-btn" onclick="${fn}(${prev})" ${current===1?'disabled':''}>‹ Prev</button>`;
+  // Build page number list with ellipsis
+  const pages = [];
+  if (total <= 7) {
+    for (let i=1; i<=total; i++) pages.push(i);
+  } else {
+    pages.push(1);
+    if (current > 4) pages.push('...');
+    for (let i=Math.max(2,current-2); i<=Math.min(total-1,current+2); i++) pages.push(i);
+    if (current < total-3) pages.push('...');
+    pages.push(total);
   }
-  btns += `<button class="page-btn" onclick="${fn}(${Math.min(total,current+1)})">›</button>`;
+  pages.forEach(p => {
+    if (p === '...') {
+      btns += `<span class="page-btn" style="cursor:default;color:var(--ink4)">…</span>`;
+    } else {
+      btns += `<button class="page-btn ${p===current?'active':''}" onclick="${fn}(${p})">${p}</button>`;
+    }
+  });
+  btns += `<button class="page-btn" onclick="${fn}(${next})" ${current===total?'disabled':''}>Next ›</button>`;
   return `<div class="pagination">${btns}<span class="page-info">Page ${current} of ${total}</span></div>`;
 }
 
@@ -3985,7 +4062,9 @@ async function updateBalanceAmt() {
   } catch(e) { toast('Error: '+e,'error'); }
 }
 
-async function loadBalanceReport() {
+async function loadBalanceReport(page) {
+  if (page !== undefined) _balPage = page;
+  else _balPage = 1; // reset to page 1 on fresh filter
   const wrap = document.getElementById('rpt-table-wrap');
   if (!wrap) return;
   wrap.innerHTML = '<div class="loading"><span class="spinner"></span>Loading report...</div>';
@@ -4000,41 +4079,63 @@ async function loadBalanceReport() {
       wrap.innerHTML = '<div class="loading">No records found.</div>';
       return;
     }
-    const tableRows = rows.map(r => {
-      const osClass = {'PENDING':'sp-pending','BAL_PENDING':'sp-bal-pending','COMPLETED':'sp-completed'}[String(r.Overall_Status||'').toUpperCase()] || 'sp-pending';
-      const osLabel = {'PENDING':'Pending','BAL_PENDING':'Bal Pending','COMPLETED':'Completed'}[String(r.Overall_Status||'').toUpperCase()] || 'Pending';
-      return `<tr>
-        <td class="mono" style="font-size:11px">${r.SO_Number||'–'}</td>
-        <td class="mono">${r.MF_No||'–'}</td>
-        <td class="mono">${r.Lorry_No||'–'}</td>
-        <td>${r.Broker_Name||'–'}</td>
-        <td class="mono" style="font-size:11px">${r.Adv_Acc_No||'–'}</td>
-        <td class="mono" style="font-size:11px">${r.Adv_IFSC||'–'}</td>
-        <td class="mono" style="font-size:11px">${r.Bal_Acc_No||'–'}</td>
-        <td class="mono" style="font-size:11px">${r.Bal_IFSC||'–'}</td>
-        <td class="mono text-right" style="font-weight:700;color:var(--amber)">₹${fmt(r.Advance_Amount)}</td>
-        <td class="mono text-right" style="font-weight:700;color:var(--blue)">₹${fmt(r.Balance_Amount)}</td>
-        <td><span class="status-pill ${osClass}">${osLabel}</span></td>
-        <td style="font-size:12px">${r.Settlement_Date ? fmtDate(r.Settlement_Date) : '–'}</td>
-      </tr>`;
-    }).join('');
-    wrap.innerHTML = `
-      <div class="table-wrap">
-        <table>
-          <thead><tr>
-            <th>SO No</th><th>MF No</th><th>Truck</th><th>Broker</th>
-            <th>Adv Account</th><th>Adv IFSC</th>
-            <th>Bal Account</th><th>Bal IFSC</th>
-            <th style="text-align:right">Advance (₹)</th>
-            <th style="text-align:right">Balance (₹)</th>
-            <th>Status</th><th>Settlement Date</th>
-          </tr></thead>
-          <tbody>${tableRows}</tbody>
-        </table>
-      </div>`;
+    _balData = rows;
+    renderBalanceTable(_balPage);
   } catch(e) {
     wrap.innerHTML = `<div class="loading" style="color:var(--red)">Error: ${e}</div>`;
   }
+}
+
+function renderBalanceTable(page) {
+  if (page !== undefined) _balPage = page;
+  const wrap = document.getElementById('rpt-table-wrap');
+  if (!wrap) return;
+  const rows = _balData;
+  if (!rows || rows.length === 0) {
+    wrap.innerHTML = '<div class="loading">No records found.</div>';
+    return;
+  }
+  const totalPages = Math.max(1, Math.ceil(rows.length / _BAL_PAGE_SIZE));
+  _balPage = Math.min(_balPage, totalPages);
+  const startIdx = (_balPage - 1) * _BAL_PAGE_SIZE;
+  const pageRows = rows.slice(startIdx, startIdx + _BAL_PAGE_SIZE);
+
+  const tableRows = pageRows.map(r => {
+    const osClass = {'PENDING':'sp-pending','BAL_PENDING':'sp-bal-pending','COMPLETED':'sp-completed'}[String(r.Overall_Status||'').toUpperCase()] || 'sp-pending';
+    const osLabel = {'PENDING':'Pending','BAL_PENDING':'Bal Pending','COMPLETED':'Completed'}[String(r.Overall_Status||'').toUpperCase()] || 'Pending';
+    return `<tr>
+      <td class="mono" style="font-size:11px">${r.SO_Number||'–'}</td>
+      <td class="mono">${r.MF_No||'–'}</td>
+      <td class="mono">${r.Lorry_No||'–'}</td>
+      <td>${r.Broker_Name||'–'}</td>
+      <td class="mono" style="font-size:11px">${r.Adv_Acc_No||'–'}</td>
+      <td class="mono" style="font-size:11px">${r.Adv_IFSC||'–'}</td>
+      <td class="mono" style="font-size:11px">${r.Bal_Acc_No||'–'}</td>
+      <td class="mono" style="font-size:11px">${r.Bal_IFSC||'–'}</td>
+      <td class="mono text-right" style="font-weight:700;color:var(--amber)">₹${fmt(r.Advance_Amount)}</td>
+      <td class="mono text-right" style="font-weight:700;color:var(--blue)">₹${fmt(r.Balance_Amount)}</td>
+      <td><span class="status-pill ${osClass}">${osLabel}</span></td>
+      <td style="font-size:12px">${r.Settlement_Date ? fmtDate(r.Settlement_Date) : '–'}</td>
+    </tr>`;
+  }).join('');
+
+  const countInfo = `<div style="font-size:11px;color:var(--ink3);margin-bottom:8px">Showing <b>${startIdx+1}–${Math.min(startIdx+_BAL_PAGE_SIZE,rows.length)}</b> of <b>${rows.length}</b> records</div>`;
+  const paginationHtml = renderPagination(_balPage, totalPages, 'renderBalanceTable');
+
+  wrap.innerHTML = `${countInfo}
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>SO No</th><th>MF No</th><th>Truck</th><th>Broker</th>
+          <th>Adv Account</th><th>Adv IFSC</th>
+          <th>Bal Account</th><th>Bal IFSC</th>
+          <th style="text-align:right">Advance (₹)</th>
+          <th style="text-align:right">Balance (₹)</th>
+          <th>Status</th><th>Settlement Date</th>
+        </tr></thead>
+        <tbody>${tableRows}</tbody>
+      </table>
+    </div>${paginationHtml}`;
 }
 
 // =============================================
@@ -4273,9 +4374,24 @@ async function previewReportSummary() {
 // =============================================
 // MASTER REPORT
 // =============================================
-let _rptData    = [];
-let _rptFilters = {};
-let _rptTab     = 'freight';
+let _rptData       = [];
+let _rptFilters    = {};
+let _rptTab        = 'freight';
+let _rptPage       = 1;
+const _RPT_PAGE_SIZE = 50;
+
+// Balance report pagination
+let _balData       = [];
+let _balPage       = 1;
+const _BAL_PAGE_SIZE = 50;
+
+// Masters pagination
+let _masterPage    = { party: 1, place: 1, broker: 1 };
+const _MASTER_PAGE_SIZE = 30;
+
+// Unloading pagination
+let _ulPage        = 1;
+const _UL_PAGE_SIZE = 50;
 
 async function renderReport() {
   showLoading();
@@ -4368,6 +4484,7 @@ async function renderReport() {
 }
 
 async function applyRptFilters() {
+  _rptPage = 1;
   _rptFilters = {
     soNumber:    (document.getElementById('rf-so')         ||{}).value || '',
     lorryNo:     (document.getElementById('rf-lorry')      ||{}).value || '',
@@ -4542,7 +4659,8 @@ function getRptCols() {
   return defs[_rptTab] || defs.status;
 }
 
-function renderRptTable() {
+function renderRptTable(page) {
+  if (page !== undefined) _rptPage = page;
   const wrap = document.getElementById('rpt-table-wrap'); if (!wrap) return;
   const cols = getRptCols();
   const d    = _rptData;
@@ -4551,17 +4669,34 @@ function renderRptTable() {
     return;
   }
 
+  const totalPages = Math.max(1, Math.ceil(d.length / _RPT_PAGE_SIZE));
+  _rptPage = Math.min(_rptPage, totalPages);
+  const startIdx = (_rptPage - 1) * _RPT_PAGE_SIZE;
+  const pageData = d.slice(startIdx, startIdx + _RPT_PAGE_SIZE);
+
   // Header
   let thead = '<thead><tr>';
   cols.forEach(c => { thead += `<th${c.rt?' style="text-align:right"':''}>${c.l}</th>`; });
   thead += '</tr></thead>';
 
-  // Body + running totals
+  // Body + running totals for current page
   const totals = {};
   cols.forEach((c,i) => { if(c.money) totals[i] = 0; });
 
-  let tbody = '<tbody>';
+  // Also compute grand totals across all data
+  const grandTotals = {};
+  cols.forEach((c,i) => { if(c.money) grandTotals[i] = 0; });
   d.forEach(r => {
+    cols.forEach((c, i) => {
+      if (c.money) {
+        const raw = parseFloat(r[Object.keys(r).find(k => c.l.replace(/[^a-zA-Z]/g,'').toLowerCase() === k.replace(/[^a-zA-Z]/g,'').toLowerCase())] || 0) || 0;
+        if (!isNaN(raw)) grandTotals[i] = (grandTotals[i]||0) + raw;
+      }
+    });
+  });
+
+  let tbody = '<tbody>';
+  pageData.forEach(r => {
     tbody += '<tr>';
     cols.forEach((c, i) => {
       const raw = parseFloat(r[Object.keys(r).find(k => c.l.replace(/[^a-zA-Z]/g,'').toLowerCase() === k.replace(/[^a-zA-Z]/g,'').toLowerCase())] || 0) || 0;
@@ -4577,20 +4712,35 @@ function renderRptTable() {
   });
   tbody += '</tbody>';
 
-  // Footer totals row
-  let tfoot = '<tfoot><tr>';
+  // Footer — page totals + grand totals if multi-page
+  let tfoot = '<tfoot>';
+  if (totalPages > 1) {
+    tfoot += '<tr>';
+    cols.forEach((c, i) => {
+      if (i === 0) {
+        tfoot += `<td style="color:#f59e0b;font-weight:700;font-size:10px">PAGE (${pageData.length})</td>`;
+      } else if (c.money && totals[i] !== undefined) {
+        tfoot += `<td style="text-align:right;font-family:var(--mono);font-size:11px">₹${totals[i].toLocaleString('en-IN',{maximumFractionDigits:0})}</td>`;
+      } else { tfoot += '<td></td>'; }
+    });
+    tfoot += '</tr>';
+  }
+  tfoot += '<tr>';
   cols.forEach((c, i) => {
     if (i === 0) {
-      tfoot += `<td style="color:var(--amber2,#f59e0b);font-weight:700;font-size:11px">TOTAL (${d.length})</td>`;
-    } else if (c.money && totals[i] !== undefined) {
-      tfoot += `<td style="text-align:right;font-family:var(--mono)">₹${totals[i].toLocaleString('en-IN',{maximumFractionDigits:0})}</td>`;
-    } else {
-      tfoot += '<td></td>';
-    }
+      tfoot += `<td style="color:#f59e0b;font-weight:700;font-size:11px">TOTAL (${d.length})</td>`;
+    } else if (c.money && grandTotals[i] !== undefined) {
+      tfoot += `<td style="text-align:right;font-family:var(--mono)">₹${grandTotals[i].toLocaleString('en-IN',{maximumFractionDigits:0})}</td>`;
+    } else { tfoot += '<td></td>'; }
   });
   tfoot += '</tr></tfoot>';
 
-  wrap.innerHTML = `<div class="table-wrap"><table>${thead}${tbody}${tfoot}</table></div>`;
+  const paginationHtml = renderPagination(_rptPage, totalPages, 'renderRptTable');
+  const countInfo = totalPages > 1
+    ? `<div style="font-size:11px;color:var(--ink3);margin-bottom:8px">Showing <b>${startIdx+1}–${Math.min(startIdx+_RPT_PAGE_SIZE,d.length)}</b> of <b>${d.length}</b> records</div>`
+    : '';
+
+  wrap.innerHTML = `${countInfo}<div class="table-wrap"><table>${thead}${tbody}${tfoot}</table></div>${paginationHtml}`;
 }
 
 function exportRptCSV() {
