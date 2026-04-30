@@ -1433,26 +1433,35 @@ const SB = {
 
   // ── PARTY LEDGER ──
   async getPartyLedger(partyId) {
-    let soQ = '?converted=eq.YES&order=id.desc';
+    // Build SO query — if partyId given filter by party, else fetch all (no converted filter so ALL SOs show)
+    let soQ = '?order=id.desc&limit=2000';
     if (partyId) soQ += '&party_id=eq.' + partyId;
-    const [soRows, mfRows, pfRows] = await Promise.all([
-      sb('so_master','GET',null, soQ + '&select=id,so_number,party_id,from_id,to_id,mt,allocated,documentation_status,mf_status,unloading_status,profit_status,created_at'),
-      sb('mf_master','GET',null,'?select=so_id,mf_no,total_cost,bilti_freight,final_mt'),
-      sb('profit_master','GET',null,'?select=so_id,gross_profit,total_revenue,gp_on_sale')
+    soQ += '&select=id,so_number,party_id,from_id,to_id,mt,converted,allocated,documentation_status,mf_status,unloading_status,profit_status,created_at';
+    const soRows = await sb('so_master','GET',null, soQ);
+    if (!soRows || !soRows.length) return [];
+
+    // Get all SO ids for this party to filter mf/profit efficiently
+    const soIds = soRows.map(r => r.id);
+    // Supabase: filter by list of IDs using in=(1,2,3)
+    const idList = soIds.join(',');
+    const [mfRows, pfRows] = await Promise.all([
+      sb('mf_master','GET',null,'?so_id=in.('+idList+')&select=so_id,mf_no,total_cost,bilti_freight,final_mt'),
+      sb('profit_master','GET',null,'?so_id=in.('+idList+')&select=so_id,gross_profit,total_revenue,gp_on_sale')
     ]);
     const mfMap={}, pfMap={};
     mfRows.forEach(r => { mfMap[String(r.so_id)] = r; });
     pfRows.forEach(r => { pfMap[String(r.so_id)] = r; });
-    const rows = soRows.map(so => {
+    return soRows.map(so => {
       const sid=String(so.id), mf=mfMap[sid]||{}, pf=pfMap[sid]||{};
       return { SO_Number: so.so_number||'', Party_ID: so.party_id, From_ID: so.from_id, To_ID: so.to_id,
+        Converted: so.converted||'PENDING',
         MT: parseFloat(so.mt)||0, Final_MT: parseFloat(mf.final_mt)||0,
+        MF_No: mf.mf_no||'',
         Bilti_Freight: parseFloat(mf.bilti_freight)||0, Total_Cost: parseFloat(mf.total_cost)||0,
         Gross_Profit: parseFloat(pf.gross_profit)||0, Total_Revenue: parseFloat(pf.total_revenue)||0,
         GP_Pct: parseFloat(pf.gp_on_sale)||0,
         Profit_Done: !!so.profit_status, Created_At: so.created_at };
     });
-    return rows;
   },
 
   // ── MONTHLY P&L ──
@@ -1479,30 +1488,73 @@ const SB = {
   },
 
   // ── BROKER OUTSTANDING ──
-  async getBrokerOutstanding() {
-    const [acctRows, brokerRows] = await Promise.all([
-      sb('account_master','GET',null,"?overall_status=neq.COMPLETED&order=id.desc&select=mf_no,so_number,lorry_no,broker_id,broker_name,adv_acc_no,adv_ifsc,bal_acc_no,bal_ifsc,advance_amount,balance_amount,adv_paid_amount,bal_paid_amount,overall_status,adv_status,bal_status"),
-      sb('broker_master','GET',null,'?select=id,broker_name,primary_acc_no,ifsc,secondary_acc_no,secondary_ifsc,contact_no')
+  // Fetches ALL active trips (from mf_master) and joins account_master
+  // so trips where advance hasn't been paid yet are also shown.
+  async getBrokerOutstanding(filterBrokerId) {
+    const [mfRows, acctRows, brokerRows] = await Promise.all([
+      sb('mf_master','GET',null,'?order=id.desc&select=id,so_id,so_number,mf_no,lorry_no,broker_id,advance,balance,freight_mf'),
+      sb('account_master','GET',null,'?select=mf_no,broker_id,broker_name,adv_acc_no,adv_ifsc,bal_acc_no,bal_ifsc,advance_amount,balance_amount,adv_paid_amount,bal_paid_amount,overall_status,adv_txn_id,bal_txn_id'),
+      sb('broker_master','GET',null,'?status=eq.ACTIVE&select=id,broker_name,primary_acc_no,ifsc,secondary_acc_no,secondary_ifsc,contact_no')
     ]);
+    // Build lookup maps
     const brokerMap = {}; brokerRows.forEach(b => { brokerMap[String(b.id)] = b; });
+    const acctMap   = {}; acctRows.forEach(a => { acctMap[String(a.mf_no)] = a; });
+
+    // Group by broker
     const grouped = {};
-    acctRows.forEach(r => {
-      const bId = String(r.broker_id||'unknown');
+    mfRows.forEach(mf => {
+      const bId = String(mf.broker_id||'');
+      if (!bId || bId === 'null' || bId === '') return;
+      const b = brokerMap[bId]||{};
+      const acct = acctMap[String(mf.mf_no||'')] || null;
+
+      // Skip if fully completed
+      if (acct && acct.overall_status === 'COMPLETED') return;
+
       if (!grouped[bId]) {
-        const b = brokerMap[bId]||{};
-        grouped[bId] = { Broker_ID: bId, Broker_Name: r.broker_name||b.broker_name||'Unknown',
-          Acc_No: r.adv_acc_no||b.primary_acc_no||'', IFSC: r.adv_ifsc||b.ifsc||'',
-          Bal_Acc: r.bal_acc_no||b.secondary_acc_no||'', Bal_IFSC: r.bal_ifsc||b.secondary_ifsc||'',
-          Contact: b.contact_no||'', trips:[], pending_adv:0, pending_bal:0, total_outstanding:0 };
+        grouped[bId] = {
+          Broker_ID:   bId,
+          Broker_Name: b.broker_name || 'Unknown',
+          Acc_No:      b.primary_acc_no   || '',
+          IFSC:        b.ifsc             || '',
+          Bal_Acc:     b.secondary_acc_no || b.primary_acc_no || '',
+          Bal_IFSC:    b.secondary_ifsc   || b.ifsc || '',
+          Contact:     b.contact_no       || '',
+          trips: [], pending_adv: 0, pending_bal: 0, total_outstanding: 0
+        };
       }
-      const advOwed = (parseFloat(r.advance_amount)||0) - (parseFloat(r.adv_paid_amount)||0);
-      const balOwed = (parseFloat(r.balance_amount)||0) - (parseFloat(r.bal_paid_amount)||0);
-      grouped[bId].pending_adv += Math.max(0, advOwed);
-      grouped[bId].pending_bal += Math.max(0, balOwed);
-      grouped[bId].total_outstanding += Math.max(0, advOwed) + Math.max(0, balOwed);
-      grouped[bId].trips.push({ MF_No: r.mf_no||'', SO_Number: r.so_number||'', Lorry_No: r.lorry_no||'', Status: r.overall_status||'' });
+
+      // Calculate amounts owed
+      const advOwed = acct
+        ? Math.max(0, (parseFloat(acct.advance_amount)||0) - (parseFloat(acct.adv_paid_amount)||0))
+        : parseFloat(mf.advance)||0;  // not yet in account_master = advance not paid
+      const balOwed = acct
+        ? Math.max(0, (parseFloat(acct.balance_amount)||0) - (parseFloat(acct.bal_paid_amount)||0))
+        : parseFloat(mf.balance)||0;
+
+      grouped[bId].pending_adv += advOwed;
+      grouped[bId].pending_bal += balOwed;
+      grouped[bId].total_outstanding += advOwed + balOwed;
+      grouped[bId].trips.push({
+        MF_No:      mf.mf_no||'',
+        SO_Number:  mf.so_number||'',
+        Lorry_No:   mf.lorry_no||'',
+        Adv_Owed:   advOwed,
+        Bal_Owed:   balOwed,
+        Adv_Acc:    acct ? (acct.adv_acc_no||b.primary_acc_no||'') : (b.primary_acc_no||''),
+        Adv_IFSC:   acct ? (acct.adv_ifsc||b.ifsc||'')             : (b.ifsc||''),
+        Bal_Acc:    acct ? (acct.bal_acc_no||b.secondary_acc_no||b.primary_acc_no||'') : (b.secondary_acc_no||b.primary_acc_no||''),
+        Bal_IFSC:   acct ? (acct.bal_ifsc||b.secondary_ifsc||b.ifsc||'')               : (b.secondary_ifsc||b.ifsc||''),
+        Adv_TxnID:  acct?.adv_txn_id||'',
+        Bal_TxnID:  acct?.bal_txn_id||'',
+        Status:     acct ? acct.overall_status : 'NOT_PAID',
+        Freight_MF: parseFloat(mf.freight_mf)||0
+      });
     });
-    return Object.values(grouped).sort((a,b) => b.total_outstanding - a.total_outstanding);
+
+    let result = Object.values(grouped).filter(b => b.total_outstanding > 0);
+    if (filterBrokerId) result = result.filter(b => String(b.Broker_ID) === String(filterBrokerId));
+    return result.sort((a,b) => b.total_outstanding - a.total_outstanding);
   },
 
   // ── GLOBAL SEARCH ──
@@ -5526,30 +5578,37 @@ function renderLedgerTable() {
     ].map(([l,v,b])=>`<div class="stat-card"><div class="stat-label">${l}</div><div class="stat-value" style="font-size:17px;font-family:var(--mono)">${v}</div></div>`).join('');
   }
 
+  const convertedPill = c => {
+    if (c==='YES') return '<span class="badge b-yes">Converted</span>';
+    if (c==='NO')  return '<span class="badge" style="background:#ffebe9;color:var(--red)">No</span>';
+    return '<span class="badge b-pending">Pending</span>';
+  };
   const tableRows = rows.map(r=>`<tr>
     <td class="mono" style="font-weight:700;color:var(--blue)">${r.SO_Number}</td>
     <td style="font-size:11px">${getPartyName(r.Party_ID)}</td>
     <td style="font-size:11px;white-space:nowrap">${getPlaceName(r.From_ID)}→${getPlaceName(r.To_ID)}</td>
+    <td class="mono" style="font-size:11px">${r.MF_No||'–'}</td>
     <td class="mono text-right">${r.MT}</td>
     <td class="mono text-right">${r.Final_MT||'–'}</td>
-    <td class="mono text-right">₹${fmt(r.Bilti_Freight)}</td>
-    <td class="mono text-right">₹${fmt(r.Total_Cost)}</td>
-    <td class="mono text-right" style="${r.Gross_Profit>=0?'color:var(--green)':'color:var(--red)'}">₹${fmt(r.Gross_Profit)}</td>
+    <td class="mono text-right">${r.Bilti_Freight?'₹'+fmt(r.Bilti_Freight):'–'}</td>
+    <td class="mono text-right">${r.Total_Cost?'₹'+fmt(r.Total_Cost):'–'}</td>
+    <td class="mono text-right" style="${r.Gross_Profit>0?'color:var(--green)':r.Gross_Profit<0?'color:var(--red)':''}">${r.Gross_Profit?'₹'+fmt(r.Gross_Profit):'–'}</td>
     <td class="mono text-right">${r.GP_Pct?r.GP_Pct+'%':'–'}</td>
-    <td>${r.Profit_Done?'<span class="badge b-yes">Done</span>':'<span class="badge b-pending">Pending</span>'}</td>
+    <td>${convertedPill(r.Converted)}</td>
+    <td>${r.Profit_Done?'<span class="badge b-yes">Done</span>':'<span class="badge" style="background:#fff8c5;color:#9a6700;border:1px solid #f0dc8a">Pending</span>'}</td>
   </tr>`).join('');
 
   wrap.innerHTML=`<div class="table-wrap"><table>
-    <thead><tr><th>SO No</th><th>Party</th><th>Route</th><th style="text-align:right">SO MT</th><th style="text-align:right">Final MT</th><th style="text-align:right">Revenue</th><th style="text-align:right">Cost</th><th style="text-align:right">Profit</th><th style="text-align:right">GP%</th><th>Status</th></tr></thead>
+    <thead><tr><th>SO No</th><th>Party</th><th>Route</th><th>MF No</th><th style="text-align:right">SO MT</th><th style="text-align:right">Final MT</th><th style="text-align:right">Revenue</th><th style="text-align:right">Cost</th><th style="text-align:right">Profit</th><th style="text-align:right">GP%</th><th>Converted</th><th>Profit</th></tr></thead>
     <tbody>${tableRows}</tbody>
     <tfoot><tr>
-      <td colspan="3" style="font-weight:700;font-size:11px;color:var(--amber)">TOTAL (${totalTrips} trips)</td>
+      <td colspan="4" style="font-weight:700;font-size:11px;color:var(--amber)">TOTAL (${totalTrips} SOs)</td>
       <td class="mono text-right">${rows.reduce((s,r)=>s+r.MT,0).toFixed(1)}</td>
       <td class="mono text-right">${totalMT.toFixed(1)}</td>
       <td class="mono text-right">₹${fmt(totalRev)}</td>
       <td class="mono text-right">₹${fmt(rows.reduce((s,r)=>s+r.Total_Cost,0))}</td>
       <td class="mono text-right" style="${totalProfit>=0?'color:var(--green)':'color:var(--red)'}">₹${fmt(totalProfit)}</td>
-      <td></td><td></td>
+      <td></td><td></td><td></td>
     </tr></tfoot>
   </table></div>`;
 }
@@ -5670,69 +5729,149 @@ async function loadMonthlyPL() {
 // =============================================
 // BROKER OUTSTANDING
 // =============================================
-async function renderBrokerOutstanding() {
-  setContent('<div class="loading"><span class="spinner"></span>Loading broker data...</div>');
-  try {
-    const brokers = await call('getBrokerOutstanding');
-    if (!brokers || !brokers.length) {
-      setContent('<div class="section-card"><div style="text-align:center;padding:40px"><div style="font-size:36px">✅</div><div style="font-size:14px;font-weight:700;color:var(--green);margin-top:10px">No outstanding broker payments!</div></div></div>');
-      return;
-    }
-    const totalOutstanding = brokers.reduce((s,b)=>s+b.total_outstanding,0);
-    const rows = brokers.map(b=>`
-      <div class="section-card" style="margin-bottom:12px">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">
-          <div>
-            <div style="font-size:14px;font-weight:700;color:var(--ink)">${b.Broker_Name}</div>
-            <div style="font-size:11px;color:var(--ink3);margin-top:2px">${b.Contact||'No contact'}</div>
-          </div>
-          <div style="text-align:right">
-            <div style="font-size:18px;font-weight:700;font-family:var(--mono);color:var(--red)">₹${fmt(b.total_outstanding)}</div>
-            <div style="font-size:10px;color:var(--ink3)">Total Outstanding</div>
-          </div>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0;padding:10px;background:var(--canvas);border-radius:4px">
-          <div>
-            <div style="font-size:10px;font-weight:700;color:var(--ink3);text-transform:uppercase">Advance A/C</div>
-            <div style="font-family:var(--mono);font-size:12px;margin:3px 0">${b.Acc_No||'–'}</div>
-            <div style="font-family:var(--mono);font-size:11px;color:var(--ink3)">${b.IFSC||'–'}</div>
-            <button class="btn btn-outline btn-sm" style="margin-top:6px;font-size:10px" onclick="copyText('${b.Acc_No} ${b.IFSC}','Advance A/C copied!')">📋 Copy Adv A/C</button>
-          </div>
-          <div>
-            <div style="font-size:10px;font-weight:700;color:var(--ink3);text-transform:uppercase">Balance A/C</div>
-            <div style="font-family:var(--mono);font-size:12px;margin:3px 0">${b.Bal_Acc||b.Acc_No||'–'}</div>
-            <div style="font-family:var(--mono);font-size:11px;color:var(--ink3)">${b.Bal_IFSC||b.IFSC||'–'}</div>
-            <button class="btn btn-outline btn-sm" style="margin-top:6px;font-size:10px" onclick="copyText('${b.Bal_Acc||b.Acc_No} ${b.Bal_IFSC||b.IFSC}','Balance A/C copied!')">📋 Copy Bal A/C</button>
-          </div>
-        </div>
-        <div style="display:flex;gap:16px;margin-bottom:8px">
-          <div><span style="font-size:10px;color:var(--ink3)">Pending Advance:</span> <span style="font-family:var(--mono);font-weight:700;color:var(--amber)">₹${fmt(b.pending_adv)}</span></div>
-          <div><span style="font-size:10px;color:var(--ink3)">Pending Balance:</span> <span style="font-family:var(--mono);font-weight:700;color:var(--blue)">₹${fmt(b.pending_bal)}</span></div>
-          <div><span style="font-size:10px;color:var(--ink3)">Trips:</span> <span style="font-weight:700">${b.trips.length}</span></div>
-        </div>
-        <div style="font-size:10px;color:var(--ink3)">
-          ${b.trips.map(t=>`<span style="font-family:var(--mono);font-size:10px;background:var(--canvas);border:1px solid var(--border);padding:1px 5px;border-radius:3px;margin:1px;display:inline-block">${t.MF_No||t.SO_Number}</span>`).join('')}
-        </div>
-      </div>`).join('');
+let _brokerOutData   = [];
+let _brokerOutFilter = '';
 
-    setContent(`
-      <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">
-        <div class="stat-card red" style="flex:1">
-          <div class="stat-label">Total Outstanding</div>
-          <div class="stat-value" style="font-size:18px;font-family:var(--mono);color:var(--red)">₹${fmt(totalOutstanding)}</div>
+async function renderBrokerOutstanding() {
+  await loadMasters();
+  setContent(`
+    <div id="bo-summary-strip" style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap"></div>
+    <div class="section-card" style="margin-bottom:12px">
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+        <div class="form-group" style="min-width:240px;margin:0">
+          <label style="font-size:11px;font-weight:700">Filter by Broker</label>
+          <select id="bo-broker-filter" onchange="filterBrokerOutstanding(this.value)"
+            style="width:100%;padding:5px 9px;border:1px solid var(--border);border-radius:4px;font-size:12px">
+            <option value="">-- All Brokers --</option>
+            ${state.brokers.map(b=>`<option value="${b.Broker_ID}">${b.Broker_Name}</option>`).join('')}
+          </select>
         </div>
-        <div class="stat-card amber" style="flex:1">
-          <div class="stat-label">Brokers with Dues</div>
-          <div class="stat-value" style="font-size:18px">${brokers.length}</div>
+        <button class="btn btn-outline btn-sm" onclick="loadBrokerOutstanding()">↺ Refresh</button>
+      </div>
+    </div>
+    <div id="bo-content"><div class="loading"><span class="spinner"></span>Loading…</div></div>
+  `);
+  loadBrokerOutstanding();
+}
+
+async function loadBrokerOutstanding() {
+  document.getElementById('bo-content').innerHTML = '<div class="loading"><span class="spinner"></span>Loading broker data…</div>';
+  try {
+    _brokerOutData = await call('getBrokerOutstanding') || [];
+    _brokerOutFilter = document.getElementById('bo-broker-filter')?.value || '';
+    renderBrokerOutTable();
+  } catch(e) {
+    document.getElementById('bo-content').innerHTML = `<div class="loading" style="color:var(--red)">Error: ${e}</div>`;
+  }
+}
+
+function filterBrokerOutstanding(val) {
+  _brokerOutFilter = val;
+  renderBrokerOutTable();
+}
+
+function renderBrokerOutTable() {
+  const wrap = document.getElementById('bo-content');
+  if (!wrap) return;
+  let brokers = _brokerOutData;
+  if (_brokerOutFilter) brokers = brokers.filter(b => String(b.Broker_ID) === String(_brokerOutFilter));
+
+  // Update summary strip
+  const totalOutstanding = _brokerOutData.reduce((s,b)=>s+b.total_outstanding,0);
+  const sumEl = document.getElementById('bo-summary-strip');
+  if (sumEl) sumEl.innerHTML = `
+    <div class="stat-card red" style="flex:1;min-width:130px">
+      <div class="stat-label">Total Outstanding</div>
+      <div class="stat-value" style="font-size:16px;font-family:var(--mono);color:var(--red)">₹${fmt(totalOutstanding)}</div>
+    </div>
+    <div class="stat-card amber" style="flex:1;min-width:130px">
+      <div class="stat-label">Pending Advance</div>
+      <div class="stat-value" style="font-size:16px;font-family:var(--mono);color:var(--amber)">₹${fmt(_brokerOutData.reduce((s,b)=>s+b.pending_adv,0))}</div>
+    </div>
+    <div class="stat-card" style="flex:1;min-width:130px;border-top-color:var(--blue)">
+      <div class="stat-label">Pending Balance</div>
+      <div class="stat-value" style="font-size:16px;font-family:var(--mono);color:var(--blue)">₹${fmt(_brokerOutData.reduce((s,b)=>s+b.pending_bal,0))}</div>
+    </div>
+    <div class="stat-card" style="flex:1;min-width:130px">
+      <div class="stat-label">Brokers with Dues</div>
+      <div class="stat-value" style="font-size:16px">${_brokerOutData.length}</div>
+    </div>`;
+
+  if (!brokers.length) {
+    wrap.innerHTML = '<div class="loading" style="color:var(--green)">✅ No outstanding payments for the selected broker.</div>';
+    return;
+  }
+
+  const statusPill = s => {
+    const map = { COMPLETED:'✅ Completed', BAL_PENDING:'⏳ Bal Pending', PENDING:'❌ Adv Not Paid', NOT_PAID:'❌ Adv Not Paid' };
+    const col  = { COMPLETED:'var(--green)', BAL_PENDING:'var(--amber)', PENDING:'var(--red)', NOT_PAID:'var(--red)' };
+    return `<span style="font-size:10px;font-weight:700;color:${col[s]||'var(--ink3)'}">${map[s]||s}</span>`;
+  };
+
+  wrap.innerHTML = brokers.map(b => `
+    <div class="section-card" style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+        <div>
+          <div style="font-size:15px;font-weight:700;color:var(--ink)">${b.Broker_Name}</div>
+          <div style="font-size:11px;color:var(--ink3);margin-top:2px">📞 ${b.Contact||'No contact on file'}</div>
         </div>
-        <div class="stat-card" style="flex:1">
-          <div class="stat-label">Total Pending Trips</div>
-          <div class="stat-value" style="font-size:18px">${brokers.reduce((s,b)=>s+b.trips.length,0)}</div>
+        <div style="text-align:right">
+          <div style="font-size:20px;font-weight:700;font-family:var(--mono);color:var(--red)">₹${fmt(b.total_outstanding)}</div>
+          <div style="font-size:10px;color:var(--ink3)">Total Outstanding (${b.trips.length} trip${b.trips.length!==1?'s':''})</div>
         </div>
       </div>
-      <div style="font-size:11px;color:var(--ink3);margin-bottom:12px">Sorted by highest outstanding first · Only PENDING and BAL_PENDING payments shown</div>
-      ${rows}`);
-  } catch(e) { setContent(`<div class="section-card"><div class="loading" style="color:var(--red)">Error: ${e}</div></div>`); }
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;padding:10px;background:var(--canvas);border-radius:4px;border:1px solid var(--divider)">
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--ink3);text-transform:uppercase;margin-bottom:4px">Advance Account</div>
+          <div style="font-family:var(--mono);font-size:13px;font-weight:700">${b.Acc_No||'–'}</div>
+          <div style="font-family:var(--mono);font-size:11px;color:var(--ink3)">${b.IFSC||'–'}</div>
+          <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn btn-outline btn-sm" style="font-size:10px" onclick="copyText('${b.Acc_No}','Acc No copied!')">📋 Acc No</button>
+            <button class="btn btn-outline btn-sm" style="font-size:10px" onclick="copyText('${b.IFSC}','IFSC copied!')">📋 IFSC</button>
+            <button class="btn btn-outline btn-sm" style="font-size:10px" onclick="copyText('${b.Acc_No}\n${b.IFSC}','Adv A/C details copied!')">📋 Both</button>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--ink3);text-transform:uppercase;margin-bottom:4px">Balance Account</div>
+          <div style="font-family:var(--mono);font-size:13px;font-weight:700">${b.Bal_Acc||b.Acc_No||'–'}</div>
+          <div style="font-family:var(--mono);font-size:11px;color:var(--ink3)">${b.Bal_IFSC||b.IFSC||'–'}</div>
+          <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn btn-outline btn-sm" style="font-size:10px" onclick="copyText('${b.Bal_Acc||b.Acc_No}','Bal Acc copied!')">📋 Acc No</button>
+            <button class="btn btn-outline btn-sm" style="font-size:10px" onclick="copyText('${b.Bal_IFSC||b.IFSC}','IFSC copied!')">📋 IFSC</button>
+            <button class="btn btn-outline btn-sm" style="font-size:10px" onclick="copyText('${b.Bal_Acc||b.Acc_No}\n${b.Bal_IFSC||b.IFSC}','Bal A/C details copied!')">📋 Both</button>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:20px;margin-bottom:10px;flex-wrap:wrap">
+        <div><span style="font-size:10px;color:var(--ink3)">Pending Advance:</span> <span style="font-family:var(--mono);font-weight:700;color:var(--amber)">₹${fmt(b.pending_adv)}</span></div>
+        <div><span style="font-size:10px;color:var(--ink3)">Pending Balance:</span> <span style="font-family:var(--mono);font-weight:700;color:var(--blue)">₹${fmt(b.pending_bal)}</span></div>
+      </div>
+
+      <div class="table-wrap">
+        <table style="font-size:11px">
+          <thead><tr>
+            <th>MF No</th><th>SO No</th><th>Lorry No</th>
+            <th style="text-align:right">Freight</th>
+            <th style="text-align:right">Adv Owed</th>
+            <th style="text-align:right">Bal Owed</th>
+            <th>Payment Status</th>
+            <th>Adv TxnID</th>
+          </tr></thead>
+          <tbody>${b.trips.map(t=>`<tr>
+            <td class="mono">${t.MF_No||'–'}</td>
+            <td class="mono" style="color:var(--blue)">${t.SO_Number||'–'}</td>
+            <td class="mono">${t.Lorry_No||'–'}</td>
+            <td class="mono text-right">₹${fmt(t.Freight_MF)}</td>
+            <td class="mono text-right" style="color:var(--amber);font-weight:700">₹${fmt(t.Adv_Owed)}</td>
+            <td class="mono text-right" style="color:var(--blue);font-weight:700">₹${fmt(t.Bal_Owed)}</td>
+            <td>${statusPill(t.Status)}</td>
+            <td class="mono" style="font-size:10px;color:var(--ink3)">${t.Adv_TxnID||'–'}</td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>
+    </div>`).join('');
 }
 
 // =============================================
