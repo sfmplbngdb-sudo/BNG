@@ -1488,73 +1488,77 @@ const SB = {
   },
 
   // ── BROKER OUTSTANDING ──
-  // Fetches ALL active trips (from mf_master) and joins account_master
-  // so trips where advance hasn't been paid yet are also shown.
+  // Correct join: broker lives in trip_dispatch_master (broker_id, broker_acc, broker_ifsc, bal_acc, bal_ifsc)
+  // mf_master links to trip via so_id. account_master links via mf_no.
   async getBrokerOutstanding(filterBrokerId) {
-    const [mfRows, acctRows, brokerRows] = await Promise.all([
-      sb('mf_master','GET',null,'?order=id.desc&select=id,so_id,so_number,mf_no,lorry_no,broker_id,advance,balance,freight_mf'),
-      sb('account_master','GET',null,'?select=mf_no,broker_id,broker_name,adv_acc_no,adv_ifsc,bal_acc_no,bal_ifsc,advance_amount,balance_amount,adv_paid_amount,bal_paid_amount,overall_status,adv_txn_id,bal_txn_id'),
-      sb('broker_master','GET',null,'?status=eq.ACTIVE&select=id,broker_name,primary_acc_no,ifsc,secondary_acc_no,secondary_ifsc,contact_no')
+    const [mfRows, tdRows, acctRows, brokerRows] = await Promise.all([
+      sb('mf_master',           'GET', null, '?order=id.desc&select=so_id,so_number,mf_no,lorry_no,advance,balance,freight_mf'),
+      sb('trip_dispatch_master','GET', null, '?select=so_id,broker_id,broker_acc,broker_ifsc,bal_acc,bal_ifsc,broker_contact'),
+      sb('account_master',      'GET', null, '?select=mf_no,adv_acc_no,adv_ifsc,bal_acc_no,bal_ifsc,advance_amount,balance_amount,adv_paid_amount,bal_paid_amount,overall_status,adv_txn_id,bal_txn_id'),
+      sb('broker_master',       'GET', null, '?select=id,broker_name,primary_acc_no,ifsc,secondary_acc_no,secondary_ifsc,contact_no')
     ]);
-    // Build lookup maps
-    const brokerMap = {}; brokerRows.forEach(b => { brokerMap[String(b.id)] = b; });
-    const acctMap   = {}; acctRows.forEach(a => { acctMap[String(a.mf_no)] = a; });
 
-    // Group by broker
+    // Build lookup maps
+    const brokerMap = {}; brokerRows.forEach(b  => { brokerMap[String(b.id)]       = b; });
+    const tdMap     = {}; tdRows.forEach(td      => { tdMap[String(td.so_id)]      = td; });
+    const acctMap   = {}; acctRows.forEach(a     => { acctMap[String(a.mf_no)]     = a; });
+
     const grouped = {};
     mfRows.forEach(mf => {
-      const bId = String(mf.broker_id||'');
+      const td   = tdMap[String(mf.so_id)] || {};
+      const bId  = String(td.broker_id || '');
       if (!bId || bId === 'null' || bId === '') return;
-      const b = brokerMap[bId]||{};
-      const acct = acctMap[String(mf.mf_no||'')] || null;
 
-      // Skip if fully completed
+      const b    = brokerMap[bId] || {};
+      const acct = acctMap[String(mf.mf_no || '')] || null;
+
+      // Skip trips fully settled
       if (acct && acct.overall_status === 'COMPLETED') return;
 
       if (!grouped[bId]) {
         grouped[bId] = {
           Broker_ID:   bId,
           Broker_Name: b.broker_name || 'Unknown',
-          Acc_No:      b.primary_acc_no   || '',
-          IFSC:        b.ifsc             || '',
-          Bal_Acc:     b.secondary_acc_no || b.primary_acc_no || '',
-          Bal_IFSC:    b.secondary_ifsc   || b.ifsc || '',
-          Contact:     b.contact_no       || '',
+          Acc_No:      b.primary_acc_no   || td.broker_acc  || '',
+          IFSC:        b.ifsc             || td.broker_ifsc || '',
+          Bal_Acc:     b.secondary_acc_no || td.bal_acc     || b.primary_acc_no   || '',
+          Bal_IFSC:    b.secondary_ifsc   || td.bal_ifsc    || b.ifsc             || '',
+          Contact:     b.contact_no || td.broker_contact || '',
           trips: [], pending_adv: 0, pending_bal: 0, total_outstanding: 0
         };
       }
 
-      // Calculate amounts owed
+      // Amount owed — if account record exists use its amounts, else use raw MF amounts
       const advOwed = acct
         ? Math.max(0, (parseFloat(acct.advance_amount)||0) - (parseFloat(acct.adv_paid_amount)||0))
-        : parseFloat(mf.advance)||0;  // not yet in account_master = advance not paid
+        : Math.max(0, parseFloat(mf.advance)||0);
       const balOwed = acct
         ? Math.max(0, (parseFloat(acct.balance_amount)||0) - (parseFloat(acct.bal_paid_amount)||0))
-        : parseFloat(mf.balance)||0;
+        : Math.max(0, parseFloat(mf.balance)||0);
 
-      grouped[bId].pending_adv += advOwed;
-      grouped[bId].pending_bal += balOwed;
+      grouped[bId].pending_adv       += advOwed;
+      grouped[bId].pending_bal       += balOwed;
       grouped[bId].total_outstanding += advOwed + balOwed;
       grouped[bId].trips.push({
-        MF_No:      mf.mf_no||'',
-        SO_Number:  mf.so_number||'',
-        Lorry_No:   mf.lorry_no||'',
+        MF_No:      mf.mf_no      || '',
+        SO_Number:  mf.so_number  || '',
+        Lorry_No:   mf.lorry_no   || '',
         Adv_Owed:   advOwed,
         Bal_Owed:   balOwed,
-        Adv_Acc:    acct ? (acct.adv_acc_no||b.primary_acc_no||'') : (b.primary_acc_no||''),
-        Adv_IFSC:   acct ? (acct.adv_ifsc||b.ifsc||'')             : (b.ifsc||''),
-        Bal_Acc:    acct ? (acct.bal_acc_no||b.secondary_acc_no||b.primary_acc_no||'') : (b.secondary_acc_no||b.primary_acc_no||''),
-        Bal_IFSC:   acct ? (acct.bal_ifsc||b.secondary_ifsc||b.ifsc||'')               : (b.secondary_ifsc||b.ifsc||''),
-        Adv_TxnID:  acct?.adv_txn_id||'',
-        Bal_TxnID:  acct?.bal_txn_id||'',
+        Adv_Acc:    acct ? (acct.adv_acc_no || b.primary_acc_no || td.broker_acc || '')                          : (b.primary_acc_no || td.broker_acc || ''),
+        Adv_IFSC:   acct ? (acct.adv_ifsc   || b.ifsc || td.broker_ifsc || '')                                   : (b.ifsc || td.broker_ifsc || ''),
+        Bal_Acc:    acct ? (acct.bal_acc_no  || b.secondary_acc_no || td.bal_acc || b.primary_acc_no || '')       : (b.secondary_acc_no || td.bal_acc || b.primary_acc_no || ''),
+        Bal_IFSC:   acct ? (acct.bal_ifsc    || b.secondary_ifsc || td.bal_ifsc || b.ifsc || '')                  : (b.secondary_ifsc || td.bal_ifsc || b.ifsc || ''),
+        Adv_TxnID:  acct ? (acct.adv_txn_id || '') : '',
+        Bal_TxnID:  acct ? (acct.bal_txn_id || '') : '',
         Status:     acct ? acct.overall_status : 'NOT_PAID',
-        Freight_MF: parseFloat(mf.freight_mf)||0
+        Freight_MF: parseFloat(mf.freight_mf) || 0
       });
     });
 
     let result = Object.values(grouped).filter(b => b.total_outstanding > 0);
     if (filterBrokerId) result = result.filter(b => String(b.Broker_ID) === String(filterBrokerId));
-    return result.sort((a,b) => b.total_outstanding - a.total_outstanding);
+    return result.sort((a, b) => b.total_outstanding - a.total_outstanding);
   },
 
   // ── GLOBAL SEARCH ──
