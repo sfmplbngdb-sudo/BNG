@@ -1234,7 +1234,7 @@ const SB = {
     // Fetch all MF records + trip data + broker data (source of truth)
     const [mfRows, tdRows, brokerRows, acctRows] = await Promise.all([
       sb('mf_master', 'GET', null, '?order=id.desc'),
-      sb('trip_dispatch_master', 'GET', null, ''),
+      sb('trip_dispatch_master', 'GET', null, '?select=so_id,lorry_no,consignor,consignee,destination_gc,broker_id,broker_contact,driver_contact,trip_status,loading_date,gc_no,invoice_no,eway_bill_no,eway_expiry,pkgs,articles,final_mt,dispatch_status,broker_acc,broker_ifsc,bal_acc,bal_ifsc'),
       sb('broker_master', 'GET', null, ''),
       sb('account_master', 'GET', null, '')
     ]);
@@ -1319,7 +1319,7 @@ const SB = {
   async getMasterReport(filters) {
     const [soRows, tdRows, mfRows, profRows] = await Promise.all([
       sb('so_master', 'GET', null, '?order=created_at.desc&limit=1000'),
-      sb('trip_dispatch_master', 'GET', null, ''),
+      sb('trip_dispatch_master', 'GET', null, '?select=so_id,lorry_no,consignor,consignee,destination_gc,broker_id,broker_contact,driver_contact,trip_status,loading_date,gc_no,invoice_no,eway_bill_no,eway_expiry,pkgs,articles,final_mt,dispatch_status,broker_acc,broker_ifsc,bal_acc,bal_ifsc'),
       sb('mf_master', 'GET', null, ''),
       sb('profit_master', 'GET', null, '')
     ]);
@@ -1338,7 +1338,7 @@ const SB = {
         MT: so.mt||0, Party_Rate: so.rate_given||0, Lorry_Rate: so.rate_received||0,
         Margin_MT: so.margin_per_mt||0, Total_Margin: so.total_margin||0,
         Converted: so.converted||'', Status: so.status||'', Remarks: so.remarks||'',
-        Lorry_No: td.lorry_no||'', Consignor: td.consignor||'', Consignee: td.consignee||'', Destination: td.destination||'',
+        Lorry_No: td.lorry_no||'', Consignor: td.consignor||'', Consignee: td.consignee||'', Destination: td.destination_gc||'',
         Trip_Status: td.trip_status||'', Loading_Date: td.loading_date||'',
         GC_No: td.gc_no||'', Invoice_No: td.invoice_no||'', Eway_Bill: td.eway_bill_no||'', Eway_Expiry: td.eway_expiry||'',
         PKGS: td.pkgs||'', Articles: td.articles||0, Final_MT: td.final_mt||0,
@@ -1363,9 +1363,9 @@ const SB = {
     return { success: true, data: rows, total: rows.length };
   },
   async getReportFilterOptions() {
-    const tdRows = await sb('trip_dispatch_master', 'GET', null, '?select=consignee,destination');
+    const tdRows = await sb('trip_dispatch_master', 'GET', null, '?select=consignee,destination_gc');
     const consignees = [...new Set(tdRows.map(r => r.consignee).filter(Boolean))].sort();
-    const destinations = [...new Set(tdRows.map(r => r.destination).filter(Boolean))].sort();
+    const destinations = [...new Set(tdRows.map(r => r.destination_gc).filter(Boolean))].sort();
     return { consignees, destinations };
   },
 
