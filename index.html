@@ -1207,12 +1207,17 @@ const SB = {
   async getMFForAccount() {
     const mfRows = await sb('mf_master', 'GET', null, '?order=id.desc');
     const tdRows = await sb('trip_dispatch_master', 'GET', null, '');
+    // Fetch completed account records to exclude from dropdown
+    const acctRows = await sb('account_master', 'GET', null, '?overall_status=eq.COMPLETED&select=mf_no');
+    const completedSet = new Set(acctRows.map(a => String(a.mf_no)));
     const tdMap = {};
     tdRows.forEach(r => { tdMap[String(r.so_id)] = r; });
-    return mfRows.map(mf => {
-      const td = tdMap[String(mf.so_id)] || {};
-      return { MF_ID: mf.mf_no, mf_no: mf.mf_no, SO_Number: mf.so_number, Lorry_No: mf.lorry_no||td.lorry_no||'', Loading_Date: td.loading_date||'', Broker_ID: td.broker_id||'', Adv_Acc_No: td.broker_acc||'', Adv_IFSC: td.broker_ifsc||'', Bal_Acc_No: td.bal_acc||'', Bal_IFSC: td.bal_ifsc||'', Advance: mf.advance||0, Balance: mf.balance||0 };
-    });
+    return mfRows
+      .filter(mf => !completedSet.has(String(mf.mf_no)))  // exclude fully paid trips
+      .map(mf => {
+        const td = tdMap[String(mf.so_id)] || {};
+        return { MF_ID: mf.mf_no, mf_no: mf.mf_no, SO_Number: mf.so_number, Lorry_No: mf.lorry_no||td.lorry_no||'', Loading_Date: td.loading_date||'', Broker_ID: td.broker_id||'', Adv_Acc_No: td.broker_acc||'', Adv_IFSC: td.broker_ifsc||'', Bal_Acc_No: td.bal_acc||'', Bal_IFSC: td.bal_ifsc||'', Advance: mf.advance||0, Balance: mf.balance||0 };
+      });
   },
   async getAccountByMF(mfNo) {
     const rows = await sb('account_master', 'GET', null, '?mf_no=eq.' + encodeURIComponent(mfNo) + '&limit=1');
@@ -1229,6 +1234,13 @@ const SB = {
   },
   async saveBalancePayment(d) {
     await sb('account_master', 'PATCH', { bal_paid_amount: d.Bal_Paid_Amount, bal_txn_id: d.Bal_Txn_ID, bal_status: 'BAL_PAID', overall_status: 'COMPLETED', settlement_date: new Date().toISOString() }, '?mf_no=eq.' + encodeURIComponent(d.MF_No));
+    // Mark the trip as COMPLETED in trip_dispatch_master so dashboard counts update
+    try {
+      const mfRows = await sb('mf_master', 'GET', null, '?mf_no=eq.' + encodeURIComponent(d.MF_No) + '&select=so_id&limit=1');
+      if (mfRows.length > 0 && mfRows[0].so_id) {
+        await sb('trip_dispatch_master', 'PATCH', { trip_status: 'COMPLETED' }, '?so_id=eq.' + mfRows[0].so_id);
+      }
+    } catch(e) { /* non-critical — account save already succeeded */ }
     return { success: true };
   },
   async updateBalanceAmount(d) {
@@ -3071,8 +3083,8 @@ function renderUnloadingTable(rows, page) {
     </div>${paginationHtml}`;
 }
 
-// Wrapper so renderPagination can navigate unloading pages without
-// corrupting _ulFilteredRows (renderUnloadingTable(rows,page) signature mismatch)
+// Wrapper: pagination calls renderUnloadingTable(page) but signature is (rows,page)
+// Using a wrapper avoids corrupting _ulFilteredRows with a page number
 function goToUnloadingPage(p) {
   _ulPage = p;
   renderUnloadingTable(undefined, p);
