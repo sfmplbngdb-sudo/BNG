@@ -1047,11 +1047,16 @@ const SB = {
       if (filters.Unloading_Status !== undefined) query += '&unloading_status=eq.' + (filters.Unloading_Status==='true'||filters.Unloading_Status===true?'true':'false');
       if (filters.Profit_Status !== undefined)   query += '&profit_status=eq.' + (filters.Profit_Status==='true'||filters.Profit_Status===true?'true':'false');
     }
-    // Get total count
-    const countRes = await fetch(SUPABASE_URL + '/rest/v1/so_master' + (query.split('&limit=')[0] || '?') + '&select=count', {
-      headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON, 'Prefer': 'count=exact', 'Range': '0-0' }
-    });
-    const total = parseInt(countRes.headers.get('content-range')?.split('/')[1] || '0');
+    // Get total count — use HEAD + Prefer:count=exact (Supabase standard)
+    const countQuery = (query.split('&limit=')[0] || '?') + '&select=id';
+    let total = 0;
+    try {
+      const countRes = await fetch(SUPABASE_URL + '/rest/v1/so_master' + countQuery, {
+        method: 'HEAD',
+        headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON, 'Prefer': 'count=exact' }
+      });
+      total = parseInt(countRes.headers.get('content-range')?.split('/')[1] || '0');
+    } catch(e) { total = 0; }
     const rows = await sb('so_master', 'GET', null, query);
     return { data: rows.map(r => ({ ...r, SO_ID: r.id, SO_Number: r.so_number, Party_ID: r.party_id, From_ID: r.from_id, To_ID: r.to_id, MT: r.mt, Rate_Given: r.rate_given, Rate_Received: r.rate_received, Total_Margin: r.total_margin, Converted: r.converted, Status: r.status, Remarks: r.remarks, Allocated: r.allocated, Documentation_Status: r.documentation_status, MF_Status: r.mf_status, Unloading_Status: r.unloading_status, Profit_Status: r.profit_status, Created_At: r.created_at })), total, page };
   },
@@ -1218,7 +1223,7 @@ const SB = {
     if (existing.length > 0) {
       await sb('account_master', 'PATCH', { adv_paid_amount: d.Adv_Paid_Amount, adv_txn_id: d.Adv_Txn_ID, adv_status: 'ADV_PAID', overall_status: 'BAL_PENDING' }, '?mf_no=eq.' + encodeURIComponent(d.MF_No));
     } else {
-      await sb('account_master', 'POST', { mf_no: d.MF_No, so_id: d.SO_ID||'', so_number: d.SO_Number||'', lorry_no: d.Lorry_No||'', loading_date: d.Loading_Date||null, broker_id: d.Broker_ID||'', broker_name: d.Broker_Name||'', adv_acc_no: d.Adv_Acc_No||'', adv_ifsc: d.Adv_IFSC||'', bal_acc_no: d.Bal_Acc_No||'', bal_ifsc: d.Bal_IFSC||'', advance_amount: d.Advance_Amount||0, balance_amount: d.Balance_Amount||0, adv_paid_amount: d.Adv_Paid_Amount, adv_txn_id: d.Adv_Txn_ID, bal_paid_amount: 0, bal_txn_id: '', adv_status: 'ADV_PAID', bal_status: 'PENDING', overall_status: 'BAL_PENDING', created_by: d.Created_By||(auth.user?auth.user.username:'admin') });
+      await sb('account_master', 'POST', { mf_no: d.MF_No, so_id: d.SO_ID||null, so_number: d.SO_Number||'', lorry_no: d.Lorry_No||'', loading_date: d.Loading_Date||null, broker_id: d.Broker_ID||null, broker_name: d.Broker_Name||'', adv_acc_no: d.Adv_Acc_No||'', adv_ifsc: d.Adv_IFSC||'', bal_acc_no: d.Bal_Acc_No||'', bal_ifsc: d.Bal_IFSC||'', advance_amount: d.Advance_Amount||0, balance_amount: d.Balance_Amount||0, adv_paid_amount: d.Adv_Paid_Amount, adv_txn_id: d.Adv_Txn_ID, bal_paid_amount: 0, bal_txn_id: '', adv_status: 'ADV_PAID', bal_status: 'PENDING', overall_status: 'BAL_PENDING', created_by: d.Created_By||(auth.user?auth.user.username:'admin') });
     }
     return { success: true };
   },
@@ -2086,7 +2091,7 @@ async function loadSOTable(page) {
 
     const result  = (raw && typeof raw === 'object') ? raw : {};
     const data    = Array.isArray(result.data) ? result.data : [];
-    const total   = typeof result.total === 'number' ? result.total : data.length;
+    const total   = (typeof result.total === 'number' && result.total > 0) ? result.total : Math.max(data.length, (page - 1) * 50 + data.length);
     const totalPages = Math.max(1, Math.ceil(total / 50));
 
     const convBadge = v => {
@@ -3001,7 +3006,7 @@ async function loadUnloadingTracking() {
 let _ulFilteredRows = null;
 
 function renderUnloadingTable(rows, page) {
-  if (rows !== undefined && rows !== null) _ulFilteredRows = rows;
+  if (rows !== undefined && rows !== null && Array.isArray(rows)) _ulFilteredRows = rows;
   const data = _ulFilteredRows || _ulAllRows || [];
   if (page !== undefined) _ulPage = page;
 
@@ -3044,7 +3049,7 @@ function renderUnloadingTable(rows, page) {
   const countInfo = data.length > _UL_PAGE_SIZE
     ? `<span style="font-size:11px;color:var(--ink3);margin-left:12px">Showing ${startIdx+1}–${Math.min(startIdx+_UL_PAGE_SIZE,data.length)} of ${data.length}</span>`
     : '';
-  const paginationHtml = renderPagination(_ulPage, totalPages, 'renderUnloadingTable');
+  const paginationHtml = renderPagination(_ulPage, totalPages, 'goToUnloadingPage');
 
   wrap.innerHTML = `
     <div style="display:flex;gap:12px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
@@ -3064,6 +3069,13 @@ function renderUnloadingTable(rows, page) {
         <tbody>${tableRows}</tbody>
       </table>
     </div>${paginationHtml}`;
+}
+
+// Wrapper so renderPagination can navigate unloading pages without
+// corrupting _ulFilteredRows (renderUnloadingTable(rows,page) signature mismatch)
+function goToUnloadingPage(p) {
+  _ulPage = p;
+  renderUnloadingTable(undefined, p);
 }
 
 function filterUnloadingList() {
@@ -4256,7 +4268,7 @@ async function submitAdvancePayment() {
   if (!_acctCurrentMF) { toast('Select an MF No first','error'); return; }
   const amt   = parseFloat(document.getElementById('adv-pay-amount').value);
   const txnId = document.getElementById('adv-txn-id').value.trim();
-  if (!amt || amt <= 0) { toast('Enter advance amount','error'); return; }
+  if (amt === null || isNaN(amt) || amt < 0) { toast('Enter a valid advance amount (0 or more)','error'); return; }
   if (!txnId)           { toast('Enter Transaction ID','error'); return; }
   const btn = document.getElementById('btn-adv-submit');
   btn.disabled = true; btn.textContent = '⏳ Saving...';
@@ -4283,7 +4295,7 @@ async function submitBalancePayment() {
   if (!_acctCurrentMF) { toast('Select an MF No first','error'); return; }
   const amt   = parseFloat(document.getElementById('bal-pay-amount').value);
   const txnId = document.getElementById('bal-txn-id').value.trim();
-  if (!amt || amt <= 0) { toast('Enter balance amount','error'); return; }
+  if (amt === null || isNaN(amt) || amt < 0) { toast('Enter a valid balance amount (0 or more)','error'); return; }
   if (!txnId)           { toast('Enter Transaction ID','error'); return; }
   try {
     const r = await call('saveBalancePayment', { MF_No: _acctCurrentMF.MF_No, Bal_Paid_Amount: amt, Bal_Txn_ID: txnId });
